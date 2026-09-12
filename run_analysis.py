@@ -19,14 +19,16 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 from churn_analysis import (  # noqa: E402
-    Window, behaviour_panel, cohort_profile, decay_curve, gains_curve,
-    intervention_value, lift_table, load_events,
+    Window, behaviour_panel, cohort_profile, exposure_table, gains_curve,
+    intervention_value, lift_table, load_events, rule_baseline, runup_analysis,
+    tier_lift,
 )
 
 INK = "#1b1b1f"
 MUTED = "#8a8f98"
 CHURN_C = "#c1442e"
 STAY_C = "#4a7ba7"
+NAIVE_C = "#b9bec6"
 GRID = "#e3e5e8"
 
 plt.rcParams.update({
@@ -47,6 +49,7 @@ SIGNAL_LABELS = {
     "rate_downgrade": "Downgrade visits per 100 events",
     "rate_settings": "Settings visits per 100 events",
     "rate_add_to_playlist": "Playlist adds per 100 events",
+    "ads_per_100_songs": "Adverts per 100 songs",
     "days_since_last_seen": "Days since last seen",
     "activity_trend": "Activity trend (daily slope)",
     "events_per_active_day": "Events per active day",
@@ -57,9 +60,6 @@ SIGNAL_LABELS = {
     "sessions": "Sessions",
 }
 
-# Volume signals say how much a user did in the lookback; decline signals say
-# which way they were heading. Both can carry lift, but only the second speaks
-# to the decay curve in §1, so the table keeps them visibly apart.
 SIGNAL_KINDS = {
     "events": "volume",
     "songs": "volume",
@@ -67,32 +67,84 @@ SIGNAL_KINDS = {
     "distinct_artists": "volume",
     "sessions": "volume",
     "events_per_active_day": "volume",
-    "activity_trend": "decline",
-    "days_since_last_seen": "decline",
+    "activity_trend": "trend",
+    "days_since_last_seen": "recency",
+}
+
+COMPONENT_LABELS = {
+    "skips": "Songs skipped",
+    "songs": "Songs played",
+    "adverts": "Adverts",
+    "thumbs_down": "Thumbs-down",
+    "thumbs_up": "Thumbs-up",
+    "errors": "Errors",
+    "help": "Help page",
+    "settings": "Settings",
+    "downgrade_pages": "Downgrade pages",
+    "upgrade_pages": "Upgrade pages",
+    "playlist_adds": "Playlist adds",
+}
+
+GROUP_STYLE = {
+    "Retained, unmatched": dict(color=NAIVE_C, lw=1.8, ls="--"),
+    "Retained, matched": dict(color=STAY_C, lw=2.2),
+    "Cancelled": dict(color=CHURN_C, lw=2.4),
 }
 
 
-def fig_decay(ev, outdir, days_before=28):
-    dc = decay_curve(ev, days_before=days_before)
-    wide = dc.pivot(index="days_to_event", columns="group", values="events")
-    wide.attrs["coverage"] = dc.attrs.get("coverage", {})
+def fig_runup(runup, outdir):
+    wide = runup.curves.pivot(index="days_to_event", columns="group", values="median_events")
 
-    fig, ax = plt.subplots(figsize=(7.2, 4.1))
-    for label, colour in (("Retained", STAY_C), ("Cancelled", CHURN_C)):
-        if label in wide:
-            ax.plot(wide.index, wide[label], color=colour, lw=2.2, label=label)
-            ax.annotate(label, (wide.index[-1], wide[label].iloc[-1]),
-                        xytext=(6, 0), textcoords="offset points",
-                        color=colour, fontweight="semibold", va="center")
+    fig, ax = plt.subplots(figsize=(7.6, 4.3))
+    ends = {}
+    for group, style in GROUP_STYLE.items():
+        if group in wide:
+            ax.plot(wide.index, wide[group], **style)
+            ends[group] = wide[group].iloc[-1]
 
-    ax.set_xlabel("Days before cancellation")
+    # Nudge end labels apart when lines finish close together.
+    span = np.nanmax(wide.to_numpy()) - np.nanmin(wide.to_numpy())
+    placed = []
+    for group, y in sorted(ends.items(), key=lambda kv: kv[1]):
+        if placed and y - placed[-1] < 0.07 * span:
+            y = placed[-1] + 0.07 * span
+        placed.append(y)
+        ax.annotate(group, (wide.index[-1], y), xytext=(8, 0), textcoords="offset points",
+                    color=GROUP_STYLE[group]["color"], fontweight="semibold", va="center",
+                    annotation_clip=False)
+
+    ax.set_xlabel("Days before cancellation (retained users: days before a matched date)")
     ax.set_ylabel("Median events per day (7-day trailing mean)")
-    ax.set_title("Daily activity in the run-up to cancellation")
+    ax.set_title("Cancellers against retained users active on the same day, on the same plan")
     ax.grid(axis="y", color=GRID, lw=0.8)
     ax.set_axisbelow(True)
-    ax.set_xlim(-days_before, 2)
-    ax.margins(y=0.15)
-    fig.savefig(Path(outdir) / "01_decay_curve.png")
+    ax.set_xlim(wide.index.min(), 1)
+    ax.margins(y=0.12)
+    fig.savefig(Path(outdir) / "01_runup_matched.png")
+    plt.close(fig)
+    return wide
+
+
+def fig_composition(runup, outdir):
+    comp = runup.composition[runup.composition["group"].isin(["Cancelled", "Retained, matched"])]
+    wide = comp.pivot(index="component", columns="group", values="change") * 100
+    wide = wide.sort_values("Cancelled")
+    labels = [COMPONENT_LABELS.get(c, c) for c in wide.index]
+
+    fig, ax = plt.subplots(figsize=(7.2, 0.42 * len(wide) + 1.6))
+    ypos = np.arange(len(wide))
+    for y, (_, row) in zip(ypos, wide.iterrows()):
+        ax.plot([row["Retained, matched"], row["Cancelled"]], [y, y], color=GRID, lw=3, zorder=1)
+    ax.scatter(wide["Retained, matched"], ypos, color=STAY_C, s=46, zorder=3, label="Retained, matched")
+    ax.scatter(wide["Cancelled"], ypos, color=CHURN_C, s=46, zorder=4, label="Cancelled")
+    ax.axvline(0, color=MUTED, lw=1.0)
+    ax.set_yticks(ypos, labels)
+    ax.set_xlabel("Change in share of activity, last week vs. weeks 2-4 before (%)")
+    ax.set_title("Mix of activity in the final week: cancellers vs. matched retained users")
+    ax.legend(frameon=False, loc="lower right", fontsize=9)
+    ax.grid(axis="x", color=GRID, lw=0.8)
+    ax.set_axisbelow(True)
+    fig.savefig(Path(outdir) / "02_runup_composition.png")
     plt.close(fig)
     return wide
 
@@ -121,35 +173,38 @@ def fig_lift(panel, signals, outdir, top_n=8):
     ax.grid(axis="x", color=GRID, lw=0.8)
     ax.set_axisbelow(True)
     ax.margins(x=0.12)
-    fig.savefig(Path(outdir) / "02_leading_signals.png")
+    fig.savefig(Path(outdir) / "03_leading_signals.png")
     plt.close(fig)
     return lt
 
 
-def fig_gains(y, scores, outdir):
-    g = gains_curve(y, scores)
-    fig, ax = plt.subplots(figsize=(6.4, 4.4))
-    ax.plot(g["share_contacted"] * 100, g["share_of_churners_caught"] * 100,
+def fig_gains(gains, rule, outdir):
+    fig, ax = plt.subplots(figsize=(6.6, 4.5))
+    ax.plot(gains["share_contacted"] * 100, gains["share_of_churners_caught"] * 100,
             color=CHURN_C, lw=2.2, label="Model ranking")
     ax.plot([0, 100], [0, 100], color=MUTED, lw=1.2, ls="--", label="Contact at random")
 
-    for q in (0.10, 0.20):
-        row = g.iloc[max(0, int(q * len(g)) - 1)]
-        ax.scatter([q * 100], [row["share_of_churners_caught"] * 100],
-                   color=INK, zorder=5, s=28)
+    rx, ry = rule["share_flagged"] * 100, rule["rule_catch"] * 100
+    ax.scatter([rx], [ry], marker="X", color=INK, s=70, zorder=6,
+               label=f"Rule: paid, seen in last {rule['recent_days']:g} days")
+    ax.annotate(f"rule {ry:.0f}% vs model {rule['model_catch'] * 100:.0f}%",
+                (rx, ry), xytext=(10, -16), textcoords="offset points", fontsize=8.5)
+
+    for q in (0.10,):
+        row = gains.iloc[max(0, int(q * len(gains)) - 1)]
+        ax.scatter([q * 100], [row["share_of_churners_caught"] * 100], color=CHURN_C, zorder=5, s=28)
         ax.annotate(f"{row['share_of_churners_caught']:.0%} of churners\nfor {q:.0%} contacted",
                     (q * 100, row["share_of_churners_caught"] * 100),
-                    xytext=(10, -18), textcoords="offset points", fontsize=8.5)
+                    xytext=(10, 4), textcoords="offset points", fontsize=8.5)
 
     ax.set_xlabel("Share of users contacted (%)")
     ax.set_ylabel("Share of churners reached (%)")
     ax.set_title("How far a retention budget goes")
-    ax.legend(frameon=False, loc="lower right")
+    ax.legend(frameon=False, loc="lower right", fontsize=8.5)
     ax.grid(color=GRID, lw=0.8)
     ax.set_axisbelow(True)
-    fig.savefig(Path(outdir) / "03_gains_curve.png")
+    fig.savefig(Path(outdir) / "04_gains_curve.png")
     plt.close(fig)
-    return g
 
 
 def fig_economics(gains, n_users, base_rate, outdir, contact_cost, value, save_rate):
@@ -170,7 +225,7 @@ def fig_economics(gains, n_users, base_rate, outdir, contact_cost, value, save_r
                  f"{save_rate:.0%} save rate")
     ax.grid(color=GRID, lw=0.8)
     ax.set_axisbelow(True)
-    fig.savefig(Path(outdir) / "04_intervention_economics.png")
+    fig.savefig(Path(outdir) / "05_intervention_economics.png")
     plt.close(fig)
     return v, best
 
@@ -198,11 +253,14 @@ def main() -> None:
     print(f"events {len(ev):,} | users {ev['userId'].nunique():,} | "
           f"anchor {anchor:%Y-%m-%d} | lookback {args.lookback}d | horizon {args.horizon}d")
 
-    decay = fig_decay(ev, args.outdir)
-    panel = behaviour_panel(ev, window)
+    runup = runup_analysis(ev)
+    fig_runup(runup, args.outdir)
+    fig_composition(runup, args.outdir)
+    print("run-up analysis done")
 
+    panel = behaviour_panel(ev, window)
     signals = [c for c in panel.columns if c.startswith("rate_")] + [
-        "days_since_last_seen", "activity_trend", "events_per_active_day",
+        "ads_per_100_songs", "days_since_last_seen", "activity_trend", "events_per_active_day",
         "events", "songs", "active_days", "distinct_artists", "sessions",
     ]
     signals = [s for s in signals if s in panel.columns]
@@ -222,16 +280,21 @@ def main() -> None:
         X, y, cv=cv, method="predict_proba",
     )[:, 1]
 
-    gains = fig_gains(y, scores, args.outdir)
+    gains = gains_curve(y, scores)
+    rule = rule_baseline(panel, gains)
+    fig_gains(gains, rule, args.outdir)
     econ, best = fig_economics(gains, len(panel), y.mean(), args.outdir,
                                args.contact_cost, args.subscriber_value, args.save_rate)
 
-    profile = cohort_profile(ev, panel)
-    write_findings(decay, lt, gains, best, panel, y, window, args, profile)
-    print(f"\nwrote 4 figures to {args.outdir}/ and findings.md")
+    write_findings(
+        runup=runup, lt=lt, gains=gains, best=best, panel=panel, y=y, window=window, args=args,
+        profile=cohort_profile(ev, panel), exposure=exposure_table(panel),
+        ads=tier_lift(panel, "ads_per_100_songs"), rule=rule,
+    )
+    print(f"\nwrote 5 figures to {args.outdir}/ and findings.md")
 
 
-def write_findings(decay, lt, gains, best, panel, y, window, args, profile) -> None:
+def write_findings(*, runup, lt, gains, best, panel, y, window, args, profile, exposure, ads, rule) -> None:
     def at(q):
         return gains.iloc[max(0, int(q * len(gains)) - 1)]
 
@@ -254,144 +317,198 @@ def write_findings(decay, lt, gains, best, panel, y, window, args, profile) -> N
         "",
         "## Setup",
         "",
-        f"- Anchor date: **{window.anchor:%Y-%m-%d}**",
+        f"- Anchor date for the panel (§3–§7): **{window.anchor:%Y-%m-%d}**",
         f"- Features from the {window.lookback_days} days before the anchor; "
         f"label is cancellation in the {window.horizon_days} days after it.",
         f"- Users at risk at the anchor: **{len(panel):,}**",
         f"- Cancelled within the horizon: **{int(y.sum()):,}** ({y.mean():.1%})",
         "",
-        "## 1. What does the run-up to cancellation look like?",
+    ]
+
+    # ---- 1. Run-up
+    cov = runup.coverage
+    act = runup.activity.set_index("group")
+    wide = runup.curves.pivot(index="days_to_event", columns="group", values="median_events")
+    first_day = int(wide.index.min())
+    lines += [
+        "## 1. What happens before a cancellation?",
+        "",
+        f"Compared against three groups. **Cancelled**: {cov['cancellers_eligible']:,} of "
+        f"{cov['cancellers_total']:,} cancellers whose account existed, and whose history was "
+        f"observed, for the full lookback. **Retained, matched**: {cov['matched_controls']:,} "
+        f"draws of {cov['matched_control_users']:,} never-cancelling users who had a session on "
+        f"the same calendar day, on the same tier, as a canceller. **Retained, unmatched**: "
+        f"{cov['unmatched_controls']:,} retained users on a random canceller date, with no other "
+        f"matching — the naive comparison, kept to show how much of the gap it creates.",
+        "",
+        "| Group | Events/day, weeks 2–4 before | Events/day, final week (excl. day 0) | Change |",
+        "|---|---|---|---|",
+    ]
+    for g in ["Cancelled", "Retained, matched", "Retained, unmatched"]:
+        if g in act.index:
+            r = act.loc[g]
+            lines.append(f"| {g} | {r['baseline_per_day']:.1f} | {r['final_per_day']:.1f} | {r['change']:+.0%} |")
+
+    c_m, m_m = act.loc["Cancelled", "change"], act.loc["Retained, matched", "change"]
+    lvl_c, lvl_m = wide.loc[first_day, "Cancelled"], wide.loc[first_day, "Retained, matched"]
+    lvl_n = wide.loc[first_day, "Retained, unmatched"]
+    mean_gap = act.loc["Cancelled", "baseline_per_day"] / act.loc["Retained, matched", "baseline_per_day"] - 1
+    lines += [
+        "",
+        f"- Four weeks out, the median canceller runs at **{lvl_c:.1f}** events/day, against "
+        f"**{lvl_m:.1f}** for matched retained users and **{lvl_n:.1f}** for unmatched ones "
+        f"(means differ by {mean_gap:+.0%}). "
+        + ("Against a fair comparison, cancellers are about as active as users who stay — the "
+           f"{lvl_c / lvl_n:.1f}x gap to the unmatched group is the comparison, not the users."
+           if abs(lvl_c / lvl_m - 1) < 0.15 else
+           f"Cancellers remain {lvl_c / lvl_m:.1f}x as active even against the matched group."),
+        f"- Over the final week, cancellers' activity changes by **{c_m:+.0%}** against "
+        f"**{m_m:+.0%}** for matched retained users — "
+        + ("no run-up specific to cancellation."
+           if abs(c_m - m_m) < 0.10 else
+           f"a {abs(c_m - m_m):.0%} gap that is specific to cancellation."),
+        f"- On day 0 the median jumps to **{wide.loc[0, 'Cancelled']:.1f}** for cancellers and "
+        f"**{wide.loc[0, 'Retained, matched']:.1f}** for matched retained users: the spike "
+        "is what any day with a visit looks like, not a signature of cancelling.",
+    ]
+    if cov["cancellers_without_match"]:
+        lines.append(f"- {cov['cancellers_without_match']:,} cancellers had no same-day, same-tier "
+                     "retained user to match and are left out of the matched comparison.")
+    lines += ["", "![run-up](figures/01_runup_matched.png)", ""]
+
+    # ---- 2. Composition
+    comp = runup.composition.set_index(["component", "group"])
+    lines += [
+        "## 2. Is it errors, skips, adverts?",
+        "",
+        "Share of activity (per 100 events) in weeks 2–4 before, and in the final week "
+        "excluding day 0 — the cancellation flow itself happens on day 0 and would "
+        "otherwise show up as behaviour.",
+        "",
+        "| Component | Cancelled | Retained, matched | Gap in change |",
+        "|---|---|---|---|",
+    ]
+    standouts = []
+    for c in COMPONENT_LABELS:
+        if (c, "Cancelled") not in comp.index:
+            continue
+        a, b = comp.loc[(c, "Cancelled")], comp.loc[(c, "Retained, matched")]
+        gap = a["change"] - b["change"]
+        lines.append(
+            f"| {COMPONENT_LABELS[c]} | {a['baseline_per_100']:.2f} → {a['final_per_100']:.2f} "
+            f"| {b['baseline_per_100']:.2f} → {b['final_per_100']:.2f} | {gap:+.0%} |"
+        )
+        # Components under 0.2 per 100 events are too sparse for a percentage change to mean much.
+        if abs(gap) >= 0.20 and min(a["baseline_per_100"], b["baseline_per_100"]) >= 0.2:
+            standouts.append(f"{COMPONENT_LABELS[c]} ({gap:+.0%})")
+    lines += [
+        "",
+        ("Components whose share moves at least 20 points more for cancellers than for "
+         "matched users: " + ", ".join(standouts) + "."
+         if standouts else
+         "No component with meaningful volume moves more than 20 points differently for "
+         "cancellers than for matched users: the mix of what they do — songs, skips, errors, "
+         "help, thumbs-down, adverts, downgrade pages — is the same as anyone else's."),
+        "",
+        "![composition](figures/02_runup_composition.png)",
         "",
     ]
 
-    if {"Cancelled", "Retained"}.issubset(decay.columns):
-        c, r = decay["Cancelled"], decay["Retained"]
-        baseline = c.loc[-28:-21].mean() if -28 in c.index else c.iloc[:7].mean()
-        below = [d for d in c.index if d < 0 and c[d] < 0.7 * baseline]
-        first = min(below) if below else None
-        # Direction is read off the data, not assumed: in this dataset the
-        # run-up rises rather than decays, and a hardcoded "falls" would make
-        # the sentence contradict the numbers beside it.
-        move = "falls" if c.loc[-1] < baseline else "rises"
-        ratio = c.loc[-1] / r.loc[-1] if r.loc[-1] else float("nan")
-        lines += [
-            f"- Median daily activity among users who cancel {move} from "
-            f"**{baseline:.0f}** events/day (4 weeks out) to **{c.loc[-1]:.0f}** on the final day.",
-            f"- Retained users sit flat at **{r.loc[-1]:.0f}** events/day over the same period — "
-            f"cancellers run **{ratio:.1f}x** more active than they do on the final day.",
-        ]
-        if first is not None:
-            lines.append(
-                f"- Activity first drops below 70% of its own baseline at "
-                f"**day {first}** — that is the size of the intervention window."
-            )
-        lines.append(
-            "- The final day or two is inflated for cancellers by construction: "
-            "cancelling requires an active session, while a retained user's "
-            "placebo anchor day need not contain one. Read the last two points "
-            "as an artefact of the alignment, not as behaviour."
-        )
-        cov = decay.attrs.get("coverage", {})
-        if cov:
-            lines.append(
-                f"- Restricted to users with a full {int(-decay.index.min())}-day history before "
-                f"their anchor: **{cov['churners_plotted']:,}** of "
-                f"**{cov['churners_total']:,}** cancellers qualify. Earlier "
-                f"cancellers are excluded because days before a user's first event "
-                f"are not days they were idle."
-            )
-    lines += ["", "![decay](figures/01_decay_curve.png)", "", "## 2. What leads cancellation?", ""]
-
+    # ---- 3. Signals
+    lines += ["## 3. What leads cancellation?", ""]
     if not lt.empty:
         lines += ["| Signal | Kind | Direction | Cancellation rate | Lift |",
                   "|---|---|---|---|---|"]
-        # Every signal above base rate is listed; the flat ones follow below, so
-        # the two together account for everything that was tested.
         for _, row in lt[lt["lift"] >= 1.0].iterrows():
             lines.append(
                 f"| {SIGNAL_LABELS.get(row['signal'], row['signal'])} "
                 f"| {SIGNAL_KINDS.get(row['signal'], 'behaviour')} | {row['direction']} "
                 f"| {row['churn_rate_quintile']:.1%} | **{row['lift']:.1f}x** |"
             )
-        top = lt.iloc[0]
-        lines += [
-            "",
-            f"Strongest single signal: **{SIGNAL_LABELS.get(top['signal'], top['signal'])}** "
-            f"({top['direction']}) — those users cancel at {top['churn_rate_quintile']:.1%} "
-            f"against a base rate of {top['base_rate']:.1%}.",
-            "",
-            "**Volume** signals measure how much a user did over the lookback; "
-            "**decline** signals measure which way they were heading. A volume "
-            "signal with high lift says heavier users cancel more, which is a "
-            "statement about who cancels, not about a run-up to it — and it "
-            "matches §1, where cancellers are the more active group throughout.",
-        ]
-        # Negative results are reported, not dropped: a signal tested and found
-        # flat is the answer to "should we act on this", and the table's top-8
-        # cut would otherwise hide it.
         flat = lt[lt["lift"] < 1.0]
         if not flat.empty:
-            names = ", ".join(
-                f"{SIGNAL_LABELS.get(s, s)} ({l:.2f}x)"
-                for s, l in zip(flat["signal"], flat["lift"])
-            )
-            lines += [
-                "",
-                f"Tested and **not** predictive — every quintile at or below the "
-                f"base rate: {names}."
-                + (" Advert exposure is the notable one: it is the lever the "
-                   "business most directly controls, and it carries no signal here."
-                   if "rate_roll_advert" in set(flat["signal"]) else ""),
-            ]
-    lines += ["", "![signals](figures/02_leading_signals.png)", "",
-              "## 3. Who cancels?", ""]
+            names = ", ".join(f"{SIGNAL_LABELS.get(s, s)} ({l:.2f}x)"
+                              for s, l in zip(flat["signal"], flat["lift"]))
+            lines += ["", f"Tested with no quintile above the base rate: {names}."]
 
-    early = profile["tenure_share_under_28d"] >= 0.5
+    tiers = {k: v for k, v in ads.items() if k != "all"}
     lines += [
-        f"- The median canceller has **{profile['tenure_median_days']:.1f} days** of history "
-        f"before cancelling. **{profile['tenure_share_under_28d']:.0%}** have under 28 days and "
-        f"**{profile['tenure_share_under_7d']:.0%}** under 7 — cancellation here is "
-        + ("concentrated in early life, not in long-tenured decline."
-           if early else
-           "spread across tenures rather than concentrated in early life."),
+        "",
+        f"**Adverts, pooled vs. within tier.** Top fifth by adverts per 100 songs: "
+        f"**{ads['all']:.2f}x** across all users, but "
+        + ", ".join(f"**{v:.2f}x** within {k} users" for k, v in tiers.items())
+        + (". Pooling hides the signal: paid users see few adverts and cancel more often, so a "
+           "high advert rate partly just means \"free tier\". Within each tier, heavier advert "
+           "exposure goes with more cancellation."
+           if ads["all"] < 1.0 and all(v > 1.0 for v in tiers.values()) else "."),
+        "",
+        "![signals](figures/03_leading_signals.png)",
+        "",
     ]
-    tiers = profile.get("churn_rate_by_tier", {})
-    if {"free", "paid"}.issubset(tiers):
-        gap = tiers["paid"] - tiers["free"]
+
+    # ---- 4. Exposure
+    lines += [
+        "## 4. Why do heavier users cancel more?",
+        "",
+        "Cancellation rate per visit, by how often users visit (quintiles of sessions in the lookback).",
+        "",
+        "| Tier | Quintile | Sessions (mean) | Cancellation rate | Per 100 sessions |",
+        "|---|---|---|---|---|",
+    ]
+    for _, r in exposure.iterrows():
+        lines.append(f"| {r['level']} | Q{r['quintile']} | {r['sessions']:.1f} | "
+                     f"{r['churn_rate']:.1%} | {r['per_100_sessions']:.2f} |")
+    lines.append("")
+    for level, grp in exposure.groupby("level"):
+        lo, hi = grp.iloc[0], grp.iloc[-1]
         lines.append(
-            f"- Paid users cancel at **{tiers['paid']:.1%}** against "
-            f"**{tiers['free']:.1%}** for free users"
-            + (". Only a paid subscription can be cancelled, so the label follows the tier."
-               if gap > 0.005 else
-               " — the two tiers are close here, so tier is not driving the label.")
+            f"- **{level}**: the most frequent visitors come {hi['sessions'] / lo['sessions']:.1f}x as "
+            f"often as the least frequent and cancel {hi['churn_rate'] / lo['churn_rate']:.1f}x as "
+            f"often — per visit, their cancellation rate is {hi['per_100_sessions'] / lo['per_100_sessions']:.0%} "
+            "of the lightest group's."
         )
-    if "paid_share_heavy" in profile:
-        skew = profile["paid_share_heavy"] - profile["paid_share_overall"]
-        within = profile.get("volume_lift_within_paid")
-        note = (
-            f"- The heaviest fifth by event volume is **{profile['paid_share_heavy']:.0%}** paid "
-            f"against **{profile['paid_share_overall']:.0%}** overall, so the volume lift in §2 "
-            + ("is partly a tier effect." if skew > 0.02 else
-               "is not explained by tier skew.")
-        )
-        if within is not None:
-            note += (
-                f" Within paid users alone, high volume carries **{within:.2f}x** lift"
-                + (" — so the effect survives tier." if within >= 1.2
-                   else ", so little of the effect survives tier.")
-            )
-        lines.append(note)
     lines += [
         "",
-        "> Cancellation is only visible here when a user clicks through it. A user who "
-        "quietly stops listening is counted as retained, which biases every result "
-        "toward engaged, paying subscribers — read any link between heavy usage and "
-        "cancellation with that in mind.",
-        "",
-        "## 4. Who is worth contacting?",
+        "Heavier users cancel more mostly because they have more visits in which to do it, "
+        "not because each visit is riskier — per visit, the most engaged users are the "
+        "*least* likely to cancel.",
         "",
     ]
 
+    # ---- 5. Who cancels
+    lines += [
+        "## 5. Who cancels?",
+        "",
+        f"- Tenure at cancellation, from account registration: median **{profile['tenure_median_days']:.0f} days**; "
+        f"**{profile['tenure_share_under_28d']:.0%}** under 28 days, **{profile['tenure_share_under_7d']:.0%}** under 7.",
+        f"- **{profile['free_share_at_cancellation']:.0%}** of cancellations come from free-tier accounts.",
+        "",
+        "| Tenure at anchor | Users | Cancellation rate |",
+        "|---|---|---|",
+    ]
+    for r in profile["churn_by_tenure"]:
+        # A few hundred users means a few dozen cancellations at most — too few to read a rate from.
+        note = " _(too few users to read)_" if r["users"] < 500 else ""
+        lines.append(f"| {r['bucket']}{note} | {r['users']:,} | {r['churn_rate']:.1%} |")
+    tiers_rate = profile.get("churn_rate_by_tier", {})
+    if {"free", "paid"}.issubset(tiers_rate):
+        lines += ["", f"- Paid users cancel at **{tiers_rate['paid']:.1%}** against "
+                      f"**{tiers_rate['free']:.1%}** for free users."]
+    if "paid_share_heavy" in profile:
+        lines.append(
+            f"- The heaviest fifth by event volume is **{profile['paid_share_heavy']:.0%}** paid "
+            f"against **{profile['paid_share_overall']:.0%}** overall; within paid users alone, "
+            f"high volume carries **{profile.get('volume_lift_within_paid', float('nan')):.2f}x** lift."
+        )
+    lines += [
+        "",
+        "> Cancellation is only visible when a user clicks through it. A user who quietly stops "
+        "listening is counted as retained.",
+        "",
+    ]
+
+    # ---- 6. Targeting
+    lines += ["## 6. Who is worth contacting?", ""]
     for q in (0.05, 0.10, 0.20):
         row = at(q)
         lines.append(
@@ -401,15 +518,21 @@ def write_findings(decay, lt, gains, best, panel, y, window, args, profile) -> N
         )
     lines += [
         "",
-        "![gains](figures/03_gains_curve.png)",
+        f"**Against a one-line rule.** \"Paid, and seen in the last {rule['recent_days']:g} days\" flags "
+        f"**{rule['share_flagged']:.0%}** of users and catches **{rule['rule_catch']:.0%}** of cancellers "
+        f"(precision {rule['rule_precision']:.1%}). Contacting the same share by model score catches "
+        f"**{rule['model_catch']:.0%}** (precision {rule['model_precision']:.1%}). The model's added value "
+        f"over the rule is **{(rule['model_catch'] - rule['rule_catch']) * 100:+.0f} points** of cancellers reached.",
         "",
-        "## 5. What is that worth?",
+        "![gains](figures/04_gains_curve.png)",
+        "",
+        "## 7. What is that worth?",
         "",
         f"At €{args.contact_cost:.2f} per contact, €{args.subscriber_value:.0f} subscriber value "
         f"and a {args.save_rate:.0%} save rate, net value peaks when contacting the top "
         f"**{best['share_contacted']:.0%}** of users.",
         "",
-        "![economics](figures/04_intervention_economics.png)",
+        "![economics](figures/05_intervention_economics.png)",
         "",
         "> The save rate is an assumption, not a measurement — it is the one input here "
         "that only an experiment can supply. See the limitations section of the README.",

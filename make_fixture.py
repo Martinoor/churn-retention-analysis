@@ -49,6 +49,7 @@ def build(n_users: int = 600, churn_rate: float = 0.223, seed: int = 7) -> pd.Da
         level = "paid" if rng.random() < 0.75 else "free"
         agent = rng.choice(["Windows NT 6.1", "Macintosh; Intel Mac OS X", "iPhone; CPU iPhone OS"])
         loc = rng.choice(["Boston-Cambridge, MA", "Phoenix-Mesa, AZ", "Dallas-Fort Worth, TX"])
+        registered = WINDOW_START - pd.Timedelta(days=int(rng.integers(40, 300)))
         session = 0
 
         for d in range(n_days):
@@ -82,6 +83,7 @@ def build(n_users: int = 600, churn_rate: float = 0.223, seed: int = 7) -> pd.Da
                         "location": loc,
                         "auth": "Logged In",
                         "status": 200,
+                        "registration": registered,
                     }
                 )
 
@@ -94,6 +96,7 @@ def build(n_users: int = 600, churn_rate: float = 0.223, seed: int = 7) -> pd.Da
                         "page": pg, "level": level, "sessionId": session, "itemInSession": 999,
                         "length": np.nan, "song": None, "artist": None, "userAgent": agent,
                         "location": loc, "auth": "Cancelled", "status": 200,
+                        "registration": registered,
                     }
                 )
 
@@ -102,6 +105,12 @@ def build(n_users: int = 600, churn_rate: float = 0.223, seed: int = 7) -> pd.Da
 
 if __name__ == "__main__":
     import pathlib
+
+    target = pathlib.Path("data/train.parquet")
+    if target.exists() and not pathlib.Path("data/.synthetic").exists():
+        raise SystemExit(
+            "data/train.parquet exists and is not synthetic — refusing to overwrite real data."
+        )
 
     df = build()
     df.to_parquet("data/train.parquet", index=False)
