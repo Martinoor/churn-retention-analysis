@@ -74,6 +74,7 @@ def decay_curve(
     events: pd.DataFrame,
     days_before: int = 28,
     seed: int = 0,
+    smooth_days: int = 7,
 ) -> pd.DataFrame:
     """Daily activity aligned on the day of cancellation.
 
@@ -81,6 +82,17 @@ def decay_curve(
     placebo anchor drawn from the churners' anchor distribution, so both groups
     are measured over comparable calendar time and the comparison is not an
     artefact of the observation window ending.
+
+    Each user's daily counts are smoothed over a trailing `smooth_days` window
+    before being summarised across users, so the curve tracks recent activity
+    level rather than whether a given calendar day happened to contain a session.
+
+    Only users whose history covers the whole window are included. A day before
+    a user's first-ever event is not a day they were idle — they were not yet a
+    subscriber — and counting those as zeros measures account age rather than
+    disengagement. Most cancellers have short histories, so this filter changes
+    the result substantially; `coverage` on the returned frame reports how many
+    users survived it.
     """
     cancel_at = churn_dates(events)
     rng = np.random.default_rng(seed)
@@ -105,21 +117,36 @@ def decay_curve(
         .reset_index()
     )
 
+    # The trailing mean at the earliest plotted day needs smooth_days of real
+    # history behind it, or that end of the curve is left unsmoothed and the
+    # comparison across the window is not like-for-like.
+    lead_in = days_before + smooth_days - 1
+    first_seen = activity.groupby("userId")["day"].min()
+    observed_from = (anchors - first_seen.reindex(anchors.index)).dt.days
+    eligible = observed_from[observed_from >= lead_in].index
+
+    daily = daily[daily["userId"].isin(eligible)]
     daily["anchor"] = daily["userId"].map(anchors)
     daily = daily.dropna(subset=["anchor"])
     daily["days_to_event"] = (daily["day"] - daily["anchor"]).dt.days
-    daily = daily[daily["days_to_event"].between(-days_before, 0)]
+    daily = daily[daily["days_to_event"].between(-lead_in, 0)]
 
     daily["group"] = np.where(
         daily["userId"].isin(cancel_at.index), "Cancelled", "Retained"
     )
 
-    # Days with no events are real zeros, not missing data — reindex to restore them.
+    # Within a user's own history, a day with no events is a real zero.
     full = (
         daily.set_index(["userId", "days_to_event"])["events"]
         .unstack(fill_value=0)
-        .reindex(columns=range(-days_before, 1), fill_value=0)
+        .reindex(columns=range(-lead_in, 1), fill_value=0)
     )
+    # Real usage is bursty: most users are idle on any given day, so a per-day
+    # median across users collapses to zero and hides the decline. Smoothing each
+    # user's own history first measures recent intensity rather than "logged in today".
+    full = full.T.rolling(smooth_days, min_periods=smooth_days).mean().T
+    full = full.loc[:, range(-days_before, 1)]
+
     group = daily.groupby("userId")["group"].first()
 
     out = (
@@ -129,11 +156,17 @@ def decay_curve(
         .rename(columns={"level_1": "days_to_event"})
     )
     out["group"] = out["userId"].map(group)
-    return (
+    curve = (
         out.groupby(["group", "days_to_event"], observed=True)["events"]
         .median()
         .reset_index()
     )
+    curve.attrs["coverage"] = {
+        "users_plotted": int(group.size),
+        "churners_plotted": int((group == "Cancelled").sum()),
+        "churners_total": int(len(cancel_at)),
+    }
+    return curve
 
 
 # --------------------------------------------------------------------------
@@ -191,13 +224,32 @@ def behaviour_panel(events: pd.DataFrame, window: Window) -> pd.DataFrame:
 
     panel["events_per_active_day"] = panel["events"] / panel["active_days"].clip(lower=1)
 
-    # Trend: second half of the lookback against the first.
-    midpoint = window.lookback_start + pd.Timedelta(days=window.lookback_days / 2)
-    first = hist[hist["time"] <= midpoint].groupby("userId").size()
-    second = hist[hist["time"] > midpoint].groupby("userId").size()
-    panel["activity_trend"] = (
-        second.reindex(panel.index).fillna(0) + 1
-    ) / (first.reindex(panel.index).fillna(0) + 1)
+    # Trend: slope of daily activity across the lookback, as a fraction of the
+    # user's own mean. A two-bucket half-vs-half ratio dilutes a late decline
+    # into a 14-day average; a slope uses every day and does not depend on where
+    # a midpoint happens to fall. Normalising by the mean keeps the signal about
+    # direction of travel rather than volume, so it stays comparable across
+    # light and heavy users.
+    daily_counts = (
+        hist.assign(day=hist["time"].dt.normalize())
+        .groupby(["userId", "day"], observed=True)
+        .size()
+        .unstack(fill_value=0)
+        .reindex(
+            columns=pd.date_range(
+                window.lookback_start.normalize() + pd.Timedelta(days=1),
+                window.anchor.normalize(),
+                freq="D",
+            ),
+            fill_value=0,
+        )
+        .reindex(panel.index, fill_value=0)
+    )
+    x = np.arange(daily_counts.shape[1], dtype=float)
+    xc = x - x.mean()
+    slope = (daily_counts.to_numpy() * xc).sum(axis=1) / (xc**2).sum()
+    mean_daily = daily_counts.to_numpy().mean(axis=1)
+    panel["activity_trend"] = slope / np.clip(mean_daily, 1e-9, None)
 
     panel["level"] = (
         hist.sort_values("time").groupby("userId")["level"].last().reindex(panel.index)
@@ -256,6 +308,44 @@ def lift_table(panel: pd.DataFrame, signals: Iterable[str], n_bins: int = 5) -> 
                      "churn_rate_quintile", "base_rate", "lift"]
         )
     return pd.DataFrame(rows).sort_values("lift", ascending=False).reset_index(drop=True)
+
+
+def cohort_profile(events: pd.DataFrame, panel: pd.DataFrame) -> dict:
+    """Who cancels, independent of the run-up.
+
+    Tenure is measured against a user's own first event, which is the only
+    registration proxy the logs carry. The tier split is here because heavy
+    usage and paid tier are entangled — reporting volume lift without it invites
+    the reader to conclude that engagement causes cancellation.
+    """
+    cancel_at = churn_dates(events)
+    first_seen = events.groupby("userId")["time"].min()
+    tenure = (
+        cancel_at - first_seen.reindex(cancel_at.index)
+    ).dt.total_seconds() / 86400.0
+
+    out = {
+        "churners": int(len(cancel_at)),
+        "tenure_median_days": float(tenure.median()),
+        "tenure_share_under_7d": float((tenure < 7).mean()),
+        "tenure_share_under_28d": float((tenure < 28).mean()),
+    }
+
+    if "level" in panel and panel["level"].notna().any():
+        by_tier = panel.groupby("level")["churned"].mean()
+        out["churn_rate_by_tier"] = {k: float(v) for k, v in by_tier.items()}
+
+        heavy = panel["events"] >= panel["events"].quantile(0.8)
+        out["paid_share_overall"] = float((panel["level"] == "paid").mean())
+        out["paid_share_heavy"] = float((panel.loc[heavy, "level"] == "paid").mean())
+
+        paid = panel[panel["level"] == "paid"]
+        if len(paid) and paid["churned"].mean():
+            paid_heavy = paid["events"] >= paid["events"].quantile(0.8)
+            out["volume_lift_within_paid"] = float(
+                paid.loc[paid_heavy, "churned"].mean() / paid["churned"].mean()
+            )
+    return out
 
 
 # --------------------------------------------------------------------------

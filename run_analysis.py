@@ -19,8 +19,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 from churn_analysis import (  # noqa: E402
-    Window, behaviour_panel, decay_curve, gains_curve, intervention_value,
-    lift_table, load_events,
+    Window, behaviour_panel, cohort_profile, decay_curve, gains_curve,
+    intervention_value, lift_table, load_events,
 )
 
 INK = "#1b1b1f"
@@ -48,7 +48,7 @@ SIGNAL_LABELS = {
     "rate_settings": "Settings visits per 100 events",
     "rate_add_to_playlist": "Playlist adds per 100 events",
     "days_since_last_seen": "Days since last seen",
-    "activity_trend": "Activity trend (2nd half vs 1st)",
+    "activity_trend": "Activity trend (daily slope)",
     "events_per_active_day": "Events per active day",
     "events": "Total events",
     "songs": "Songs played",
@@ -57,10 +57,25 @@ SIGNAL_LABELS = {
     "sessions": "Sessions",
 }
 
+# Volume signals say how much a user did in the lookback; decline signals say
+# which way they were heading. Both can carry lift, but only the second speaks
+# to the decay curve in §1, so the table keeps them visibly apart.
+SIGNAL_KINDS = {
+    "events": "volume",
+    "songs": "volume",
+    "active_days": "volume",
+    "distinct_artists": "volume",
+    "sessions": "volume",
+    "events_per_active_day": "volume",
+    "activity_trend": "decline",
+    "days_since_last_seen": "decline",
+}
+
 
 def fig_decay(ev, outdir, days_before=28):
     dc = decay_curve(ev, days_before=days_before)
     wide = dc.pivot(index="days_to_event", columns="group", values="events")
+    wide.attrs["coverage"] = dc.attrs.get("coverage", {})
 
     fig, ax = plt.subplots(figsize=(7.2, 4.1))
     for label, colour in (("Retained", STAY_C), ("Cancelled", CHURN_C)):
@@ -71,8 +86,8 @@ def fig_decay(ev, outdir, days_before=28):
                         color=colour, fontweight="semibold", va="center")
 
     ax.set_xlabel("Days before cancellation")
-    ax.set_ylabel("Median events per day")
-    ax.set_title("Disengagement is visible well before the cancellation click")
+    ax.set_ylabel("Median events per day (7-day trailing mean)")
+    ax.set_title("Daily activity in the run-up to cancellation")
     ax.grid(axis="y", color=GRID, lw=0.8)
     ax.set_axisbelow(True)
     ax.set_xlim(-days_before, 2)
@@ -211,11 +226,12 @@ def main() -> None:
     econ, best = fig_economics(gains, len(panel), y.mean(), args.outdir,
                                args.contact_cost, args.subscriber_value, args.save_rate)
 
-    write_findings(decay, lt, gains, best, panel, y, window, args)
+    profile = cohort_profile(ev, panel)
+    write_findings(decay, lt, gains, best, panel, y, window, args, profile)
     print(f"\nwrote 4 figures to {args.outdir}/ and findings.md")
 
 
-def write_findings(decay, lt, gains, best, panel, y, window, args) -> None:
+def write_findings(decay, lt, gains, best, panel, y, window, args, profile) -> None:
     def at(q):
         return gains.iloc[max(0, int(q * len(gains)) - 1)]
 
@@ -244,7 +260,7 @@ def write_findings(decay, lt, gains, best, panel, y, window, args) -> None:
         f"- Users at risk at the anchor: **{len(panel):,}**",
         f"- Cancelled within the horizon: **{int(y.sum()):,}** ({y.mean():.1%})",
         "",
-        "## 1. How much warning do we get?",
+        "## 1. What does the run-up to cancellation look like?",
         "",
     ]
 
@@ -253,23 +269,48 @@ def write_findings(decay, lt, gains, best, panel, y, window, args) -> None:
         baseline = c.loc[-28:-21].mean() if -28 in c.index else c.iloc[:7].mean()
         below = [d for d in c.index if d < 0 and c[d] < 0.7 * baseline]
         first = min(below) if below else None
+        # Direction is read off the data, not assumed: in this dataset the
+        # run-up rises rather than decays, and a hardcoded "falls" would make
+        # the sentence contradict the numbers beside it.
+        move = "falls" if c.loc[-1] < baseline else "rises"
+        ratio = c.loc[-1] / r.loc[-1] if r.loc[-1] else float("nan")
         lines += [
-            f"- Median daily activity among users who cancel falls from "
+            f"- Median daily activity among users who cancel {move} from "
             f"**{baseline:.0f}** events/day (4 weeks out) to **{c.loc[-1]:.0f}** on the final day.",
-            f"- Retained users sit flat at **{r.loc[-1]:.0f}** events/day over the same period.",
+            f"- Retained users sit flat at **{r.loc[-1]:.0f}** events/day over the same period — "
+            f"cancellers run **{ratio:.1f}x** more active than they do on the final day.",
         ]
         if first is not None:
             lines.append(
                 f"- Activity first drops below 70% of its own baseline at "
                 f"**day {first}** — that is the size of the intervention window."
             )
+        lines.append(
+            "- The final day or two is inflated for cancellers by construction: "
+            "cancelling requires an active session, while a retained user's "
+            "placebo anchor day need not contain one. Read the last two points "
+            "as an artefact of the alignment, not as behaviour."
+        )
+        cov = decay.attrs.get("coverage", {})
+        if cov:
+            lines.append(
+                f"- Restricted to users with a full {int(-decay.index.min())}-day history before "
+                f"their anchor: **{cov['churners_plotted']:,}** of "
+                f"**{cov['churners_total']:,}** cancellers qualify. Earlier "
+                f"cancellers are excluded because days before a user's first event "
+                f"are not days they were idle."
+            )
     lines += ["", "![decay](figures/01_decay_curve.png)", "", "## 2. What leads cancellation?", ""]
 
     if not lt.empty:
-        lines += ["| Signal | Direction | Cancellation rate | Lift |", "|---|---|---|---|"]
-        for _, row in lt.head(8).iterrows():
+        lines += ["| Signal | Kind | Direction | Cancellation rate | Lift |",
+                  "|---|---|---|---|---|"]
+        # Every signal above base rate is listed; the flat ones follow below, so
+        # the two together account for everything that was tested.
+        for _, row in lt[lt["lift"] >= 1.0].iterrows():
             lines.append(
-                f"| {SIGNAL_LABELS.get(row['signal'], row['signal'])} | {row['direction']} "
+                f"| {SIGNAL_LABELS.get(row['signal'], row['signal'])} "
+                f"| {SIGNAL_KINDS.get(row['signal'], 'behaviour')} | {row['direction']} "
                 f"| {row['churn_rate_quintile']:.1%} | **{row['lift']:.1f}x** |"
             )
         top = lt.iloc[0]
@@ -278,9 +319,78 @@ def write_findings(decay, lt, gains, best, panel, y, window, args) -> None:
             f"Strongest single signal: **{SIGNAL_LABELS.get(top['signal'], top['signal'])}** "
             f"({top['direction']}) — those users cancel at {top['churn_rate_quintile']:.1%} "
             f"against a base rate of {top['base_rate']:.1%}.",
+            "",
+            "**Volume** signals measure how much a user did over the lookback; "
+            "**decline** signals measure which way they were heading. A volume "
+            "signal with high lift says heavier users cancel more, which is a "
+            "statement about who cancels, not about a run-up to it — and it "
+            "matches §1, where cancellers are the more active group throughout.",
         ]
+        # Negative results are reported, not dropped: a signal tested and found
+        # flat is the answer to "should we act on this", and the table's top-8
+        # cut would otherwise hide it.
+        flat = lt[lt["lift"] < 1.0]
+        if not flat.empty:
+            names = ", ".join(
+                f"{SIGNAL_LABELS.get(s, s)} ({l:.2f}x)"
+                for s, l in zip(flat["signal"], flat["lift"])
+            )
+            lines += [
+                "",
+                f"Tested and **not** predictive — every quintile at or below the "
+                f"base rate: {names}."
+                + (" Advert exposure is the notable one: it is the lever the "
+                   "business most directly controls, and it carries no signal here."
+                   if "rate_roll_advert" in set(flat["signal"]) else ""),
+            ]
     lines += ["", "![signals](figures/02_leading_signals.png)", "",
-              "## 3. Who is worth contacting?", ""]
+              "## 3. Who cancels?", ""]
+
+    early = profile["tenure_share_under_28d"] >= 0.5
+    lines += [
+        f"- The median canceller has **{profile['tenure_median_days']:.1f} days** of history "
+        f"before cancelling. **{profile['tenure_share_under_28d']:.0%}** have under 28 days and "
+        f"**{profile['tenure_share_under_7d']:.0%}** under 7 — cancellation here is "
+        + ("concentrated in early life, not in long-tenured decline."
+           if early else
+           "spread across tenures rather than concentrated in early life."),
+    ]
+    tiers = profile.get("churn_rate_by_tier", {})
+    if {"free", "paid"}.issubset(tiers):
+        gap = tiers["paid"] - tiers["free"]
+        lines.append(
+            f"- Paid users cancel at **{tiers['paid']:.1%}** against "
+            f"**{tiers['free']:.1%}** for free users"
+            + (". Only a paid subscription can be cancelled, so the label follows the tier."
+               if gap > 0.005 else
+               " — the two tiers are close here, so tier is not driving the label.")
+        )
+    if "paid_share_heavy" in profile:
+        skew = profile["paid_share_heavy"] - profile["paid_share_overall"]
+        within = profile.get("volume_lift_within_paid")
+        note = (
+            f"- The heaviest fifth by event volume is **{profile['paid_share_heavy']:.0%}** paid "
+            f"against **{profile['paid_share_overall']:.0%}** overall, so the volume lift in §2 "
+            + ("is partly a tier effect." if skew > 0.02 else
+               "is not explained by tier skew.")
+        )
+        if within is not None:
+            note += (
+                f" Within paid users alone, high volume carries **{within:.2f}x** lift"
+                + (" — so the effect survives tier." if within >= 1.2
+                   else ", so little of the effect survives tier.")
+            )
+        lines.append(note)
+    lines += [
+        "",
+        "> Cancellation is only visible here when a user clicks through it. A user who "
+        "quietly stops listening is counted as retained, which biases every result "
+        "toward engaged, paying subscribers — read any link between heavy usage and "
+        "cancellation with that in mind.",
+        "",
+        "## 4. Who is worth contacting?",
+        "",
+    ]
 
     for q in (0.05, 0.10, 0.20):
         row = at(q)
@@ -293,7 +403,7 @@ def write_findings(decay, lt, gains, best, panel, y, window, args) -> None:
         "",
         "![gains](figures/03_gains_curve.png)",
         "",
-        "## 4. What is that worth?",
+        "## 5. What is that worth?",
         "",
         f"At €{args.contact_cost:.2f} per contact, €{args.subscriber_value:.0f} subscriber value "
         f"and a {args.save_rate:.0%} save rate, net value peaks when contacting the top "
