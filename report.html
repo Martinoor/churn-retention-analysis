@@ -1,0 +1,1080 @@
+<title>Decision, Not Decline</title>
+<meta name="description" content="Presentation of a subscriber churn analysis: what precedes a cancellation, and where to intervene.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&family=Schibsted+Grotesk:wght@500;600;700;800&display=swap">
+<style>
+:root {
+  color-scheme: light;
+  --ground: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #12151b;
+  --ink-2: #4a5260;
+  --ink-3: #737c8b;
+  --rule: #dde2e9;
+  --rule-strong: #c5ccd6;
+  --cancel: #eb6834;
+  --retain: #2a78d6;
+  --naive: #a3aab5;
+  --slate: #3d4654;
+  --wash: #fbe9e1;
+  --focus: #2a78d6;
+  --shadow: 0 1px 2px rgba(18, 21, 27, .06), 0 8px 24px rgba(18, 21, 27, .06);
+
+  --f-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0f1216;
+    --surface: #171b21;
+    --ink: #eef1f5;
+    --ink-2: #b3bac5;
+    --ink-3: #848d9b;
+    --rule: #272d36;
+    --rule-strong: #38404b;
+    --cancel: #d95926;
+    --retain: #3987e5;
+    --naive: #6b7380;
+    --slate: #c3cad4;
+    --wash: #2a1810;
+    --focus: #3987e5;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0f1216;
+  --surface: #171b21;
+  --ink: #eef1f5;
+  --ink-2: #b3bac5;
+  --ink-3: #848d9b;
+  --rule: #272d36;
+  --rule-strong: #38404b;
+  --cancel: #d95926;
+  --retain: #3987e5;
+  --naive: #6b7380;
+  --slate: #c3cad4;
+  --wash: #2a1810;
+  --focus: #3987e5;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 18px;
+  line-height: 1.55;
+  padding-inline: clamp(16px, 4vw, 56px);
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 1240px; margin-inline: auto; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- slides ---------- */
+.slide {
+  padding-block: clamp(56px, 9vh, 96px);
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 32px;
+  scroll-margin-top: 0;
+}
+.slide:last-of-type { border-bottom: 0; }
+@media (min-width: 960px) and (min-height: 640px) {
+  .slide { min-height: 100svh; }
+}
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+.grid.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 959px) { .grid, .grid.even { grid-template-columns: minmax(0, 1fr); } }
+.stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  letter-spacing: .04em;
+  color: var(--ink-3);
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.eyebrow b { color: var(--ink-2); font-weight: 500; }
+
+h1, h2, h3 { font-family: var(--f-display); margin: 0; text-wrap: balance; color: var(--ink); }
+h1 { font-size: clamp(44px, 6.6vw, 88px); line-height: .98; font-weight: 800; letter-spacing: -.03em; }
+h1 .quiet { color: var(--ink-3); font-weight: 600; }
+h2 { font-size: clamp(28px, 3.3vw, 44px); line-height: 1.08; font-weight: 700; letter-spacing: -.02em; max-width: 22ch; }
+h3 { font-size: 20px; line-height: 1.25; font-weight: 600; letter-spacing: -.005em; }
+p { margin: 0; max-width: 62ch; }
+.lede { font-size: clamp(19px, 1.6vw, 23px); color: var(--ink-2); line-height: 1.45; max-width: 46ch; }
+.body { color: var(--ink-2); }
+.small { font-size: 15px; color: var(--ink-3); line-height: 1.5; }
+.num { font-variant-numeric: tabular-nums; }
+strong { color: var(--ink); font-weight: 600; }
+
+.tok {
+  font-family: var(--f-mono);
+  font-size: .82em;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* ---------- title slide ---------- */
+.title-slide { gap: 40px; }
+.title-slide .logline {
+  font-family: var(--f-mono);
+  font-size: 14px;
+  color: var(--ink-3);
+}
+.title-slide .logline .hit { color: var(--ink); background: var(--wash); padding: 2px 6px; border-radius: 3px; }
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  font-family: var(--f-mono);
+  font-size: 14px;
+  color: var(--ink-2);
+  border-top: 1px solid var(--rule);
+  padding-top: 20px;
+}
+.meta span strong { font-weight: 500; }
+
+/* ---------- stats ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.stats.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
+.stat .v {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(26px, 2.6vw, 34px);
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+}
+.stat .v .vs { font-size: .55em; color: var(--ink-3); font-weight: 600; letter-spacing: 0; }
+.stat .k { font-size: 14px; color: var(--ink-2); line-height: 1.35; }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.sw.line { width: 18px; height: 3px; border-radius: 2px; }
+.sw.dash { width: 18px; height: 0; border-top: 2px dashed var(--naive); border-radius: 0; background: none !important; }
+
+/* ---------- panels & charts ---------- */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: clamp(16px, 2vw, 24px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; align-items: baseline; }
+.panel-title { font-family: var(--f-display); font-weight: 600; font-size: 16px; color: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.chart { overflow-x: auto; }
+.chart svg { display: block; width: 100%; height: auto; min-width: 540px; }
+.chart.narrow svg { min-width: 300px; }
+.chart svg text { font-family: var(--f-mono); }
+.caption { font-size: 14px; color: var(--ink-3); line-height: 1.45; }
+details.data { font-size: 14px; color: var(--ink-2); }
+details.data summary { cursor: pointer; color: var(--ink-3); font-family: var(--f-mono); font-size: 13px; }
+.table-wrap { overflow-x: auto; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 600; color: var(--ink-2); font-size: 13px; }
+
+.multiples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 640px) { .multiples { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- lists ---------- */
+.questions { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; }
+.questions li { background: var(--surface); padding: 20px 22px; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.questions .n { font-family: var(--f-mono); color: var(--ink-3); font-size: 14px; }
+.questions h3 { margin-bottom: 4px; }
+.questions p { color: var(--ink-2); font-size: 16px; }
+
+.points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.points li { padding-left: 18px; border-left: 2px solid var(--rule-strong); }
+.points li h3 { font-size: 18px; margin-bottom: 2px; }
+.points li p { color: var(--ink-2); font-size: 16px; }
+
+.constraint { display: flex; flex-direction: column; gap: 6px; }
+.constraint h3 { font-size: 18px; }
+.constraint p { color: var(--ink-2); font-size: 16px; }
+
+.log {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  line-height: 1.8;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--ink-2);
+}
+.log .hd { color: var(--ink-3); }
+.log .hit { color: var(--ink); background: var(--wash); border-radius: 3px; }
+
+.callout {
+  background: var(--wash);
+  border-radius: 10px;
+  padding: 16px 18px;
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.proposal {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  padding: clamp(18px, 2.2vw, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow);
+}
+.proposal .label { font-family: var(--f-mono); font-size: 13px; color: var(--ink-3); letter-spacing: .04em; }
+.spec { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 20px; margin: 0; }
+.spec dt { font-family: var(--f-mono); font-size: 13px; color: var(--ink-3); padding-top: 3px; }
+.spec dd { margin: 0; font-size: 16px; color: var(--ink); }
+@media (max-width: 520px) { .spec { grid-template-columns: minmax(0, 1fr); gap: 2px 0; } .spec dd { margin-bottom: 10px; } }
+
+.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 12px; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; font-size: 16px; color: var(--ink-2); }
+.steps li::before { content: counter(step); font-family: var(--f-mono); color: var(--ink-3); font-size: 14px; padding-top: 1px; }
+.steps li strong { color: var(--ink); }
+
+/* ---------- controls ---------- */
+.controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 720px) { .controls { grid-template-columns: minmax(0, 1fr); } }
+.control { display: flex; flex-direction: column; gap: 6px; }
+.control label { font-size: 14px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; }
+.control output { font-family: var(--f-mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--slate); }
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+@media (max-width: 720px) { .readout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- nav & tooltip ---------- */
+.deck-nav {
+  position: fixed;
+  right: clamp(12px, 2vw, 24px);
+  bottom: clamp(12px, 2vw, 24px);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+.deck-nav button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.deck-nav button:hover { background: var(--ground); color: var(--ink); }
+.deck-nav .count { font-family: var(--f-mono); font-size: 13px; color: var(--ink-2); padding-inline: 6px; font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
+.progress { position: fixed; inset: 0 0 auto 0; height: 3px; background: transparent; z-index: 20; }
+.progress i { display: block; height: 100%; width: 0; background: var(--ink-2); transition: width .15s linear; }
+
+.tip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 30;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: var(--shadow);
+  min-width: 150px;
+}
+.tip .t { font-family: var(--f-mono); color: var(--ink-3); font-size: 12px; margin-bottom: 2px; }
+.tip .r { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .r span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.tip .r span:last-child { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+@media print {
+  body { background: #fff; font-size: 12pt; }
+  .deck-nav, .progress, .tip { display: none !important; }
+  .slide { min-height: auto; page-break-after: always; border: 0; padding-block: 24px; }
+  .panel, .proposal { box-shadow: none; }
+}
+</style>
+
+<div class="progress" aria-hidden="true"><i id="progress-bar"></i></div>
+
+<main>
+
+<!-- ============ Title ============ -->
+<section class="slide title-slide" id="s-title" aria-label="Title">
+  <p class="logline">page = <span class="hit">"Cancellation Confirmation"</span></p>
+  <h1>Cancellation is a decision,<br><span class="quiet">not a decline.</span></h1>
+  <p class="lede">What happens before a subscriber cancels on a music-streaming service, and where a retention team should intervene.</p>
+  <div class="meta">
+    <span><strong>Martino Orioli</strong></span>
+    <span>17,499,636 events</span>
+    <span>19,140 users</span>
+    <span>51 days</span>
+  </div>
+  <p class="small">Modelling developed with a teammate for the 2025/26 Kaggle churn competition, which our team won. The behavioural analysis, findings and recommendations presented here are my own.</p>
+</section>
+
+<!-- ============ 01 Question ============ -->
+<section class="slide" id="s-question" aria-label="The question">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>01</b> The question</p>
+      <h2>Retention pays only if we know whom to reach, when, and how.</h2>
+      <p class="body">The competition scored models on balanced accuracy over a held-out set. That ranks models; it does not tell a retention team what to do on Monday.</p>
+    </div>
+    <ol class="questions">
+      <li><span class="n">Q1</span><div><h3>Is churn predictable?</h3><p>Or does it look random until the moment someone cancels?</p></div></li>
+      <li><span class="n">Q2</span><div><h3>From which signals, and how early?</h3><p>A signal that appears the day before cancellation leaves no time to act.</p></div></li>
+      <li><span class="n">Q3</span><div><h3>Where does retention effort pay back?</h3><p>Contacting every user costs more than it recovers.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ 02 Data ============ -->
+<section class="slide" id="s-data" aria-label="The data">
+  <div class="grid even">
+    <div class="stack">
+      <p class="eyebrow"><b>02</b> The data</p>
+      <h2>Fifty-one days of raw event logs, one row per interaction.</h2>
+      <div class="stats">
+        <div class="stat"><span class="v">17.5M</span><span class="k">events</span></div>
+        <div class="stat"><span class="v">19,140</span><span class="k">users</span></div>
+        <div class="stat"><span class="v">4,271</span><span class="k">cancellations</span></div>
+      </div>
+      <div class="log" role="img" aria-label="Illustrative sequence of log events ending in a cancellation"><span class="hd">time                  level  page</span>
+2018-11-14 18:02:11   paid   NextSong
+2018-11-14 18:05:47   paid   Settings
+2018-11-14 18:06:03   paid   Downgrade
+2018-11-14 18:06:09   paid   Cancel
+2018-11-14 18:06:10   paid   <span class="hit">Cancellation Confirmation</span></div>
+      <p class="caption">Illustrative sequence showing the log format; identifiers omitted. 1 October to 20 November 2018.</p>
+    </div>
+    <div class="stack">
+      <p class="eyebrow">Two constraints shaped the method</p>
+      <div class="panel constraint">
+        <h3>The prediction window is not in the data</h3>
+        <p>The competition asked for churn in the 10 days after 20 November, but the logs end on that date. Features are therefore built up to an anchor date, and the label is cancellation <em>after</em> it.</p>
+      </div>
+      <div class="panel constraint">
+        <h3>Nothing before 1 October is observed</h3>
+        <p>A user's first logged event is not their sign-up date. Tenure is measured from <span class="tok">registration</span>, and the run-up analysis uses only users whose full history is visible: 1,108 of 4,271 cancellers.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 03 First look ============ -->
+<section class="slide" id="s-first" aria-label="The first look">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>03</b> The first look</p>
+      <h2>The expected fade was not there. Cancellers looked busier.</h2>
+      <p class="body">Aligned on the day they cancelled, and set against retained users on random dates, cancellers ran at <strong class="num">18.7</strong> events a day four weeks out, against <strong class="num">6.9</strong>: nearly three times as active, and climbing into a spike.</p>
+      <p class="callout">Before acting on this, one question: is the comparison fair?</p>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="panel-head">
+        <span class="panel-title">Median events per day, 7-day trailing mean</span>
+        <div class="legend">
+          <span class="key"><i class="sw line" style="background:var(--cancel)"></i>Cancelled</span>
+          <span class="key"><i class="sw dash"></i>Retained, random date</span>
+        </div>
+      </div>
+      <div class="chart" id="chart-first"></div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 04 Fair comparison ============ -->
+<section class="slide" id="s-fair" aria-label="A fair comparison">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>04</b> A fair comparison</p>
+      <h2>Matched on day and plan, the gap disappears.</h2>
+      <ul class="points">
+        <li><h3>Seasonality</h3><p>Everyone listens more as these weeks go on (+9% for retained users over the same dates).</p></li>
+        <li><h3>Plan</h3><p>Cancellers are more often paid subscribers, and paid subscribers listen more.</p></li>
+        <li><h3>Presence</h3><p>A cancellation requires a visit. A random day for a retained user is often a day with no visit.</p></li>
+      </ul>
+      <div class="stats">
+        <div class="stat"><span class="v">+7% <span class="vs">vs</span> +7%</span><span class="k">change into the final week, cancelled vs matched</span></div>
+        <div class="stat"><span class="v">33.6 <span class="vs">vs</span> 32.1</span><span class="k">median events on the day itself</span></div>
+      </div>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="panel-head">
+        <span class="panel-title">Median events per day, 7-day trailing mean</span>
+        <div class="legend">
+          <span class="key"><i class="sw line" style="background:var(--cancel)"></i>Cancelled</span>
+          <span class="key"><i class="sw line" style="background:var(--retain)"></i>Retained, same day and plan</span>
+          <span class="key"><i class="sw dash"></i>Retained, random date</span>
+        </div>
+      </div>
+      <div class="chart" id="chart-fair"></div>
+      <p class="caption">Each canceller is compared with retained users on the same plan who had a session on the same calendar day: 5,540 draws from 4,195 users.</p>
+      <details class="data"><summary>Show data</summary><div class="table-wrap" id="table-fair"></div></details>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 05 Composition ============ -->
+<section class="slide" id="s-mix" aria-label="What users do">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>05</b> What they do</p>
+      <h2>Nothing in the experience gets worse before a cancellation.</h2>
+      <p class="body">Cancellers and matched users shift their activity in the same way. Skips move from <strong class="num">12.5</strong> to <strong class="num">12.2</strong> per 100 events (matched: 12.6 to 12.3), errors stay at <strong class="num">0.10</strong>, and downgrade-page visits move from 0.83 to 0.89 (matched: 0.74 to 0.79).</p>
+      <p class="small">The day of cancellation is excluded: it contains the cancellation flow itself, which would otherwise appear as behaviour.</p>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="panel-head">
+        <span class="panel-title">Change in share of activity, final week vs weeks 2–4 before</span>
+        <div class="legend">
+          <span class="key"><i class="sw" style="background:var(--cancel)"></i>Cancelled</span>
+          <span class="key"><i class="sw" style="background:var(--retain)"></i>Retained, matched</span>
+        </div>
+      </div>
+      <div class="chart" id="chart-mix"></div>
+      <details class="data"><summary>Show data</summary><div class="table-wrap" id="table-mix"></div></details>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 06 Exposure ============ -->
+<section class="slide" id="s-exposure" aria-label="Who cancels more">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>06</b> Who cancels more</p>
+      <h2>Heavy users cancel more because they visit more, not because each visit is riskier.</h2>
+      <p class="body">Among paid subscribers, the most frequent visitors come <strong class="num">11.9×</strong> as often as the least frequent and cancel <strong class="num">5.5×</strong> as often. Each visit carries some chance of cancellation; engaged users simply have more visits.</p>
+      <div class="stats">
+        <div class="stat"><span class="v">46%</span><span class="k">per-visit rate of the most frequent paid users, relative to the least frequent</span></div>
+        <div class="stat"><span class="v">24%</span><span class="k">the same ratio for free users</span></div>
+      </div>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="panel-head">
+        <span class="panel-title">Cancellations per 100 sessions, by visit frequency</span>
+      </div>
+      <div class="multiples">
+        <div class="stack" style="gap:6px"><span class="small">Paid subscribers</span><div class="chart narrow" id="chart-exp-paid"></div></div>
+        <div class="stack" style="gap:6px"><span class="small">Free users</span><div class="chart narrow" id="chart-exp-free"></div></div>
+      </div>
+      <p class="caption">Quintiles of sessions in the 28 days before 10 November; cancellation within the following 10 days. Q1 visits least, Q5 most.</p>
+      <details class="data"><summary>Show data</summary><div class="table-wrap" id="table-exp"></div></details>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 07 Signals ============ -->
+<section class="slide" id="s-signals" aria-label="What carries signal">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>07</b> What does carry signal</p>
+      <h2>Intent shows in a few places, and one of them hides when plans are pooled.</h2>
+      <div class="stats two">
+        <div class="stat"><span class="v">1.6×</span><span class="k">cancellation rate among users with the most <span class="tok">Downgrade</span> visits</span></div>
+        <div class="stat"><span class="v">1.3×</span><span class="k">among users with the most <span class="tok">Thumbs Down</span></span></div>
+        <div class="stat"><span class="v">4.3–4.4%</span><span class="k">cancellation rate from 4 weeks to 6 months of tenure: flat</span></div>
+        <div class="stat"><span class="v">33%</span><span class="k">of cancellations come from free accounts</span></div>
+      </div>
+      <p class="small">Lift compares the cancellation rate in the top fifth of users on a signal with the average rate of 4.5%.</p>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="panel-head">
+        <span class="panel-title">Lift for the top fifth by adverts per 100 songs</span>
+      </div>
+      <div class="chart" id="chart-ads"></div>
+      <p class="caption">Pooled, heavy advert exposure looks protective. Within each plan it predicts cancellation. Paid subscribers see few adverts yet cancel more often, which reverses the pooled figure.</p>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 08 Targeting ============ -->
+<section class="slide" id="s-target" aria-label="Who to contact">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>08</b> Who to contact</p>
+      <h2>A one-line rule gets most of the way. The model adds 11 points.</h2>
+      <p class="body">The rule <strong>“paid, and seen in the last 3 days”</strong> flags 33% of active users and reaches 55% of those who cancel within 10 days. Ranking the same number of users by model score reaches 66%.</p>
+      <div class="stats">
+        <div class="stat"><span class="v">26%</span><span class="k">of cancellers reached by the top 10% of model scores</span></div>
+        <div class="stat"><span class="v">55% <span class="vs">→</span> 66%</span><span class="k">rule vs model, at 33% of users contacted</span></div>
+      </div>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="panel-head">
+        <span class="panel-title">Share of cancellers reached, by share of users contacted</span>
+        <div class="legend">
+          <span class="key"><i class="sw line" style="background:var(--slate)"></i>Model ranking</span>
+          <span class="key"><i class="sw dash"></i>Random contact</span>
+          <span class="key"><i class="sw" style="background:var(--cancel);border-radius:2px;transform:rotate(45deg)"></i>One-line rule</span>
+        </div>
+      </div>
+      <div class="chart" id="chart-gains"></div>
+      <p class="caption">14,729 users active in the 28 days before 10 November; 658 (4.5%) cancelled in the following 10 days. Model scores are cross-validated.</p>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 09 Economics ============ -->
+<section class="slide" id="s-worth" aria-label="What it is worth">
+  <div class="grid">
+    <div class="stack">
+      <p class="eyebrow"><b>09</b> What it is worth</p>
+      <h2>Whether a campaign pays depends on a number we do not have yet.</h2>
+      <p class="body">The value of contacting users turns on the <strong>save rate</strong>: the share of contacted cancellers who stay. No amount of historical data can supply it; only an experiment can.</p>
+      <div class="readout" aria-live="polite">
+        <div class="stat"><span class="v num" id="out-best">44%</span><span class="k">best share of users to contact</span></div>
+        <div class="stat"><span class="v num" id="out-net">€0</span><span class="k">net value at that point</span></div>
+        <div class="stat"><span class="v num" id="out-breakeven">1%</span><span class="k">lowest save rate that breaks even</span></div>
+      </div>
+      <p class="small">Assumes contacting a user who would have stayed costs only the contact.</p>
+    </div>
+    <figure class="panel" style="margin:0">
+      <div class="controls">
+        <div class="control">
+          <label for="in-save">Save rate <output id="o-save" for="in-save">25%</output></label>
+          <input id="in-save" type="range" min="1" max="50" step="1" value="25">
+        </div>
+        <div class="control">
+          <label for="in-cost">Cost per contact <output id="o-cost" for="in-cost">€0.50</output></label>
+          <input id="in-cost" type="range" min="0.1" max="5" step="0.1" value="0.5">
+        </div>
+        <div class="control">
+          <label for="in-value">Subscriber value <output id="o-value" for="in-value">€60</output></label>
+          <input id="in-value" type="range" min="10" max="150" step="5" value="60">
+        </div>
+      </div>
+      <div class="panel-head"><span class="panel-title">Net value of a campaign, by share of users contacted</span></div>
+      <div class="chart" id="chart-econ"></div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ 10 Implications ============ -->
+<section class="slide" id="s-means" aria-label="What it means">
+  <div class="grid even">
+    <div class="stack">
+      <p class="eyebrow"><b>10</b> What it means</p>
+      <h2>Act at the moment of decision, not on a predicted decline.</h2>
+      <ul class="points">
+        <li><h3>An engagement-decline alert would never fire</h3><p>There is no decline to detect.</p></li>
+        <li><h3>Activity-based campaigns reach the safest users</h3><p>They mostly find frequent visitors, who are the least likely to cancel on any given visit.</p></li>
+        <li><h3>The cancellation path is where intent is visible</h3><p>Most cancellations are reached from the downgrade page.</p></li>
+      </ul>
+      <figure class="panel" style="margin:0">
+        <div class="panel-head"><span class="panel-title">Page viewed immediately before <span class="tok">Cancel</span></span></div>
+        <div class="chart narrow" id="chart-before"></div>
+      </figure>
+    </div>
+    <div class="proposal">
+      <span class="label">PROPOSED TEST</span>
+      <h3 style="font-size:clamp(22px,2vw,28px)">A save offer on the downgrade and cancellation path</h3>
+      <dl class="spec">
+        <dt>Offer</dt><dd>Pause the subscription, a lower-priced plan, or a time-limited discount.</dd>
+        <dt>Design</dt><dd>Randomise users entering the flow into offer and holdout groups.</dd>
+        <dt>Primary metric</dt><dd>Subscribers still active 60 days later, not only “did not cancel today”.</dd>
+        <dt>Guardrails</dt><dd>Revenue per user, and cancellations that are delayed rather than prevented.</dd>
+        <dt>What it yields</dt><dd>The measured save rate that every budget calculation here depends on.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 11 Limits & next ============ -->
+<section class="slide" id="s-next" aria-label="Limits and next steps">
+  <div class="grid even">
+    <div class="stack">
+      <p class="eyebrow"><b>11</b> Limits</p>
+      <h2>What this analysis can and cannot claim.</h2>
+      <ul class="points">
+        <li><h3>The data is very likely simulated</h3><p>The schema matches Udacity's public Sparkify dataset, and 30% of cancellations are reached directly from an advert page, which a real app would not allow. Some results may be built into the data; the method is what transfers.</p></li>
+        <li><h3>Only explicit cancellations are visible</h3><p>Users who stop listening without cancelling count as retained.</p></li>
+        <li><h3>Observational, one season, one anchor date</h3><p>Every recommendation is a hypothesis to test, and the save rate is assumed.</p></li>
+      </ul>
+    </div>
+    <div class="stack">
+      <p class="eyebrow">Next steps, in order</p>
+      <ol class="steps">
+        <li><span><strong>Run the save-offer test</strong> on the cancellation path.</span></li>
+        <li><span><strong>Hold any targeting model to the one-line rule</strong> and fund it for the 11 points it adds.</span></li>
+        <li><span><strong>Test advert frequency for free users</strong>, the one experience lever with signal within plan.</span></li>
+        <li><span><strong>Collect what the logs lack</strong>: billing dates, plan price, cancellation reasons.</span></li>
+        <li><span><strong>Add a behavioural churn label</strong> (no activity for N days) and repeat the analysis.</span></li>
+        <li><span><strong>Track cancellations per 1,000 sessions</strong>, so more usage is not mistaken for more risk.</span></li>
+      </ol>
+      <p class="small">Code, findings and reproduction steps: <span class="tok">github.com/Martinoor/churn-retention-analysis</span></p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<nav class="deck-nav" aria-label="Slide navigation">
+  <button type="button" id="nav-prev" aria-label="Previous slide">↑</button>
+  <span class="count" id="nav-count" aria-live="polite">1 / 12</span>
+  <button type="button" id="nav-next" aria-label="Next slide">↓</button>
+</nav>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const DATA = {"days":[-28,-27,-26,-25,-24,-23,-22,-21,-20,-19,-18,-17,-16,-15,-14,-13,-12,-11,-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0],"curves":{"Cancelled":[18.714,18.214,19.0,19.357,19.286,19.929,19.429,19.571,20.571,21.214,21.143,21.143,20.714,20.857,21.929,21.714,20.5,21.643,21.929,22.714,23.286,22.5,22.571,24.5,23.714,23.286,24.429,25.0,33.571],"Retained, matched":[17.0,17.429,17.857,18.429,18.143,18.571,18.571,18.714,18.857,19.857,19.571,20.429,20.571,20.714,20.857,20.857,20.857,20.714,20.714,20.714,21.0,20.714,21.0,22.143,22.571,22.571,23.143,23.0,32.143],"Retained, unmatched":[6.857,6.857,7.143,7.286,7.286,7.286,7.571,7.571,7.571,7.571,7.571,7.429,7.571,7.571,7.714,7.857,8.0,8.0,8.286,8.429,8.571,8.857,9.143,9.286,9.571,9.857,9.857,9.857,9.857]},"composition":[{"component":"skips","cancel":{"base":12.524313721342129,"final":12.213949017748986,"change":-0.02478097487004527},"matched":{"base":12.600743393807964,"final":12.306589361818032,"change":-0.02334418079924394}},{"component":"songs","cancel":{"base":82.21393254095577,"final":82.77143571917628,"change":0.006781127735773884},"matched":{"base":82.33461935199344,"final":82.77810544835086,"change":0.005386386672432852}},{"component":"adverts","cancel":{"base":1.431027775525147,"final":1.0266893137409807,"change":-0.2825510927876892},"matched":{"base":1.0519135156250188,"final":0.7403860445065561,"change":-0.29615312142211747}},{"component":"thumbs_down","cancel":{"base":1.0168571217020017,"final":0.9697424553641966,"change":-0.0463336149516711},"matched":{"base":0.888079905116633,"final":0.8924446190028159,"change":0.004914776092822093}},{"component":"thumbs_up","cancel":{"base":4.203173976355604,"final":4.208142413230105,"change":0.0011820678616802915},"matched":{"base":4.762763989142064,"final":4.694648762178641,"change":-0.01430161711113731}},{"component":"errors","cancel":{"base":0.09602083546353853,"final":0.09710591457312898,"change":0.011300454785175162},"matched":{"base":0.09768111136198566,"final":0.09865985350995711,"change":0.010019768759022663}},{"component":"help","cancel":{"base":0.5118368891599882,"final":0.5293095275714963,"change":0.03413712216050646},"matched":{"base":0.5110082605443892,"final":0.5045977374813962,"change":-0.012544852124628414}},{"component":"settings","cancel":{"base":0.6868369185421287,"final":0.6566993205877706,"change":-0.04387882645901997},"matched":{"base":0.683287891981151,"final":0.6820106165265679,"change":-0.001869307900187911}},{"component":"downgrade_pages","cancel":{"base":0.8297516503948372,"final":0.886461789645547,"change":0.06834591919609223},"matched":{"base":0.7372032585324607,"final":0.7900858616462005,"change":0.07173408758259203}},{"component":"upgrade_pages","cancel":{"base":0.2188381831494599,"final":0.1596487070100595,"change":-0.27047142910602473},"matched":{"base":0.20148078902151648,"final":0.14210516050888847,"change":-0.2946962278685894}},{"component":"playlist_adds","cancel":{"base":2.36020858969251,"final":2.420735239900985,"change":0.025644619070029018},"matched":{"base":2.3712683643968546,"final":2.400050574103503,"change":0.01213789638439744}}],"exposure":[{"quintile":1,"users":1305,"churn_rate":0.016091954022988506,"sessions":1.0727969348659003,"per_100_sessions":1.5,"level":"free"},{"quintile":2,"users":1305,"churn_rate":0.01532567049808429,"sessions":2.2130268199233716,"per_100_sessions":0.6925207756232686,"level":"free"},{"quintile":3,"users":1305,"churn_rate":0.02681992337164751,"sessions":3.4996168582375478,"per_100_sessions":0.7663674184366105,"level":"free"},{"quintile":4,"users":1305,"churn_rate":0.03524904214559387,"sessions":5.868199233716475,"per_100_sessions":0.6006790284669626,"level":"free"},{"quintile":5,"users":1305,"churn_rate":0.0475095785440613,"sessions":13.078927203065135,"per_100_sessions":0.36325287086946334,"level":"free"},{"quintile":1,"users":1641,"churn_rate":0.019500304692260818,"sessions":1.5984156002437537,"per_100_sessions":1.2199771254288982,"level":"paid"},{"quintile":2,"users":1641,"churn_rate":0.03351614868982328,"sessions":3.5929311395490555,"per_100_sessions":0.9328358208955223,"level":"paid"},{"quintile":3,"users":1640,"churn_rate":0.04390243902439024,"sessions":5.9036585365853655,"per_100_sessions":0.7436480066102045,"level":"paid"},{"quintile":4,"users":1641,"churn_rate":0.08470444850700792,"sessions":9.332114564290068,"per_100_sessions":0.9076661878020111,"level":"paid"},{"quintile":5,"users":1641,"churn_rate":0.10725167580743449,"sessions":18.964046313223644,"per_100_sessions":0.5655526992287918,"level":"paid"}],"ads":{"all":0.8094428311544503,"free":1.266498447204969,"paid":1.350046410930867},"gains":{"share_contacted":[0.0001,0.001,0.002,0.0031,0.004,0.005,0.006,0.0071,0.008,0.009,0.01,0.0111,0.012,0.013,0.0141,0.015,0.016,0.017,0.0181,0.019,0.02,0.021,0.0221,0.023,0.024,0.0251,0.026,0.027,0.028,0.0291,0.03,0.031,0.032,0.0331,0.034,0.035,0.0361,0.037,0.038,0.039,0.0401,0.041,0.042,0.043,0.0441,0.045,0.046,0.0471,0.048,0.049,0.05,0.0511,0.052,0.053,0.054,0.0551,0.056,0.057,0.058,0.059,0.06,0.061,0.0621,0.063,0.064,0.065,0.0661,0.067,0.068,0.069,0.07,0.071,0.072,0.0731,0.074,0.075,0.076,0.0771,0.078,0.079,0.08,0.081,0.082,0.083,0.0841,0.085,0.086,0.087,0.0881,0.089,0.09,0.091,0.092,0.093,0.094,0.0951,0.096,0.097,0.098,0.0991,0.1,0.101,0.102,0.103,0.104,0.105,0.106,0.107,0.108,0.109,0.1101,0.111,0.112,0.113,0.114,0.115,0.116,0.117,0.118,0.119,0.12,0.1211,0.122,0.123,0.124,0.1251,0.126,0.127,0.128,0.129,0.13,0.131,0.1321,0.133,0.134,0.135,0.1361,0.137,0.138,0.139,0.14,0.141,0.142,0.1431,0.144,0.145,0.146,0.1471,0.148,0.149,0.15,0.151,0.152,0.153,0.154,0.155,0.156,0.157,0.1581,0.159,0.16,0.161,0.162,0.163,0.164,0.165,0.166,0.167,0.168,0.1691,0.17,0.171,0.172,0.173,0.174,0.175,0.176,0.177,0.178,0.179,0.1801,0.181,0.182,0.183,0.184,0.185,0.186,0.187,0.188,0.189,0.19,0.1911,0.192,0.193,0.194,0.195,0.196,0.197,0.198,0.199,0.2,0.201,0.2021,0.203,0.204,0.205,0.206,0.207,0.208,0.209,0.21,0.211,0.212,0.213,0.214,0.215,0.216,0.217,0.218,0.219,0.22,0.221,0.222,0.223,0.224,0.225,0.226,0.227,0.228,0.229,0.23,0.231,0.232,0.233,0.234,0.235,0.236,0.237,0.238,0.239,0.24,0.241,0.242,0.243,0.244,0.245,0.246,0.247,0.248,0.249,0.2501,0.251,0.252,0.253,0.254,0.255,0.256,0.257,0.258,0.259,0.26,0.261,0.262,0.263,0.264,0.265,0.266,0.267,0.268,0.269,0.27,0.271,0.272,0.273,0.274,0.275,0.276,0.277,0.278,0.279,0.28,0.281,0.282,0.283,0.284,0.285,0.286,0.287,0.288,0.289,0.29,0.291,0.292,0.293,0.294,0.295,0.296,0.297,0.298,0.299,0.3,0.301,0.302,0.303,0.304,0.305,0.306,0.307,0.308,0.309,0.31,0.311,0.312,0.313,0.314,0.315,0.316,0.317,0.318,0.319,0.32,0.321,0.322,0.323,0.324,0.325,0.326,0.327,0.328,0.329,0.33,0.331,0.332,0.333,0.334,0.335,0.336,0.337,0.338,0.339,0.34,0.341,0.342,0.343,0.344,0.345,0.346,0.347,0.348,0.349,0.35,0.351,0.352,0.353,0.354,0.355,0.356,0.357,0.358,0.359,0.36,0.361,0.362,0.363,0.364,0.365,0.366,0.367,0.368,0.369,0.37,0.371,0.372,0.373,0.374,0.375,0.376,0.377,0.378,0.379,0.38,0.381,0.382,0.383,0.384,0.385,0.386,0.387,0.388,0.389,0.39,0.391,0.392,0.393,0.394,0.395,0.396,0.397,0.398,0.399,0.4,0.401,0.402,0.403,0.404,0.405,0.406,0.407,0.408,0.409,0.41,0.411,0.412,0.413,0.414,0.415,0.416,0.417,0.418,0.419,0.42,0.421,0.422,0.423,0.424,0.425,0.426,0.427,0.428,0.429,0.43,0.431,0.432,0.433,0.434,0.435,0.436,0.437,0.438,0.439,0.44,0.441,0.442,0.443,0.444,0.445,0.446,0.447,0.448,0.449,0.45,0.451,0.452,0.453,0.454,0.455,0.456,0.457,0.458,0.459,0.46,0.461,0.462,0.463,0.464,0.465,0.466,0.467,0.468,0.469,0.47,0.471,0.472,0.473,0.474,0.475,0.476,0.477,0.478,0.479,0.48,0.481,0.482,0.483,0.484,0.485,0.486,0.487,0.488,0.489,0.49,0.491,0.492,0.493,0.494,0.495,0.496,0.497,0.498,0.499,0.5,0.501,0.502,0.503,0.504,0.505,0.506,0.507,0.508,0.509,0.51,0.511,0.512,0.513,0.514,0.515,0.516,0.517,0.518,0.519,0.52,0.521,0.522,0.523,0.524,0.525,0.526,0.527,0.528,0.529,0.53,0.531,0.532,0.533,0.534,0.535,0.536,0.537,0.538,0.539,0.54,0.541,0.542,0.543,0.544,0.545,0.546,0.547,0.548,0.549,0.55,0.551,0.552,0.553,0.554,0.555,0.556,0.557,0.558,0.559,0.56,0.561,0.562,0.563,0.564,0.565,0.566,0.567,0.568,0.569,0.57,0.571,0.572,0.573,0.574,0.575,0.576,0.577,0.578,0.579,0.58,0.581,0.582,0.583,0.584,0.585,0.586,0.587,0.588,0.589,0.59,0.591,0.592,0.593,0.594,0.595,0.596,0.597,0.598,0.599,0.6,0.601,0.602,0.603,0.604,0.605,0.606,0.607,0.608,0.609,0.61,0.611,0.612,0.613,0.614,0.615,0.616,0.617,0.618,0.619,0.62,0.621,0.622,0.623,0.624,0.625,0.626,0.627,0.628,0.629,0.63,0.631,0.632,0.633,0.634,0.635,0.636,0.637,0.638,0.639,0.64,0.641,0.642,0.643,0.644,0.645,0.646,0.647,0.648,0.649,0.65,0.651,0.652,0.653,0.654,0.655,0.656,0.657,0.658,0.659,0.66,0.661,0.662,0.663,0.664,0.665,0.666,0.667,0.668,0.669,0.67,0.671,0.672,0.673,0.674,0.675,0.676,0.677,0.678,0.679,0.68,0.681,0.682,0.683,0.684,0.685,0.686,0.687,0.688,0.689,0.69,0.691,0.692,0.693,0.694,0.695,0.696,0.697,0.698,0.699,0.7,0.701,0.702,0.703,0.704,0.705,0.706,0.707,0.708,0.709,0.71,0.711,0.712,0.713,0.714,0.715,0.716,0.717,0.718,0.719,0.72,0.721,0.722,0.723,0.724,0.725,0.726,0.727,0.728,0.729,0.73,0.731,0.732,0.733,0.734,0.735,0.736,0.737,0.738,0.739,0.74,0.741,0.742,0.743,0.744,0.745,0.746,0.747,0.748,0.749,0.75,0.751,0.752,0.753,0.754,0.755,0.756,0.757,0.758,0.759,0.76,0.761,0.762,0.763,0.764,0.765,0.766,0.767,0.768,0.769,0.77,0.771,0.772,0.773,0.774,0.775,0.776,0.777,0.778,0.779,0.78,0.781,0.782,0.783,0.784,0.785,0.786,0.787,0.788,0.789,0.79,0.791,0.792,0.793,0.794,0.795,0.796,0.797,0.7979,0.799,0.8,0.801,0.802,0.803,0.804,0.805,0.806,0.807,0.808,0.8089,0.81,0.811,0.812,0.813,0.814,0.815,0.816,0.817,0.818,0.819,0.8199,0.821,0.822,0.823,0.824,0.825,0.826,0.827,0.828,0.829,0.83,0.8309,0.832,0.833,0.834,0.835,0.836,0.837,0.838,0.839,0.84,0.841,0.8419,0.843,0.844,0.845,0.846,0.847,0.848,0.849,0.85,0.851,0.852,0.8529,0.854,0.855,0.856,0.8569,0.858,0.859,0.86,0.861,0.862,0.863,0.8639,0.865,0.866,0.867,0.8679,0.869,0.87,0.871,0.872,0.873,0.874,0.875,0.876,0.877,0.878,0.8789,0.88,0.881,0.882,0.883,0.884,0.885,0.886,0.887,0.888,0.889,0.8899,0.891,0.892,0.893,0.894,0.895,0.896,0.897,0.898,0.899,0.9,0.9009,0.902,0.903,0.904,0.9049,0.906,0.907,0.908,0.909,0.91,0.911,0.9119,0.913,0.914,0.915,0.9159,0.917,0.918,0.919,0.92,0.921,0.922,0.9229,0.924,0.925,0.926,0.9269,0.928,0.929,0.93,0.931,0.932,0.933,0.9339,0.935,0.936,0.937,0.9379,0.939,0.94,0.941,0.942,0.943,0.944,0.9449,0.946,0.947,0.948,0.9489,0.95,0.951,0.952,0.9529,0.954,0.955,0.9559,0.957,0.958,0.959,0.9599,0.961,0.962,0.963,0.9639,0.965,0.966,0.9669,0.968,0.969,0.97,0.9709,0.972,0.973,0.974,0.9749,0.976,0.977,0.9779,0.979,0.98,0.981,0.9819,0.983,0.984,0.985,0.9859,0.987,0.988,0.9889,0.99,0.991,0.992,0.9929,0.994,0.995,0.996,0.9969,0.998,0.999,1.0],"caught":[0.0,0.0106,0.0152,0.0182,0.0228,0.0258,0.0334,0.038,0.0395,0.0426,0.0441,0.0471,0.0517,0.0547,0.0562,0.0593,0.0623,0.0669,0.0669,0.0714,0.0775,0.079,0.0836,0.0881,0.0897,0.0927,0.0973,0.1033,0.1079,0.1109,0.117,0.117,0.117,0.1216,0.1246,0.1292,0.1322,0.1337,0.1368,0.1413,0.1413,0.1429,0.1444,0.1489,0.1489,0.1535,0.1565,0.1596,0.1611,0.1657,0.1657,0.1657,0.1672,0.1702,0.1717,0.1793,0.1824,0.1839,0.193,0.193,0.1945,0.1991,0.2006,0.2006,0.2021,0.2036,0.2052,0.2067,0.2112,0.2112,0.2143,0.2158,0.2158,0.2158,0.2204,0.2219,0.2234,0.2264,0.228,0.2295,0.2325,0.2325,0.234,0.234,0.234,0.2356,0.2371,0.2371,0.2386,0.2401,0.2416,0.2432,0.2447,0.2477,0.2492,0.2523,0.2523,0.2553,0.2553,0.2584,0.2614,0.2675,0.2675,0.2736,0.2736,0.2736,0.2751,0.2766,0.2781,0.2812,0.2827,0.2842,0.2842,0.2857,0.2872,0.2903,0.2903,0.2918,0.2948,0.2979,0.2979,0.2979,0.2979,0.3024,0.3055,0.3085,0.31,0.3161,0.3207,0.3207,0.3207,0.3252,0.3267,0.3283,0.3283,0.3313,0.3359,0.3389,0.3389,0.3435,0.3465,0.3495,0.3526,0.3526,0.3541,0.3556,0.3556,0.3617,0.3647,0.3678,0.3693,0.3693,0.3708,0.3723,0.3723,0.3739,0.3754,0.3784,0.3784,0.3815,0.383,0.3845,0.3936,0.3967,0.3982,0.4012,0.4043,0.4073,0.4103,0.4103,0.4119,0.4134,0.4179,0.421,0.4225,0.424,0.424,0.4271,0.4271,0.4331,0.4347,0.4362,0.4362,0.4377,0.4392,0.4407,0.4453,0.4468,0.4498,0.4498,0.4514,0.4514,0.459,0.4605,0.4635,0.465,0.4666,0.4696,0.4726,0.4726,0.4742,0.4772,0.4802,0.4818,0.4848,0.4848,0.4863,0.4863,0.4894,0.4909,0.4924,0.4954,0.497,0.5015,0.503,0.503,0.5046,0.5061,0.5076,0.5076,0.5091,0.5106,0.5137,0.5167,0.5167,0.5213,0.5228,0.5228,0.5228,0.5258,0.5258,0.5274,0.5289,0.5304,0.5304,0.5319,0.5334,0.535,0.535,0.535,0.5365,0.5365,0.5395,0.5395,0.5395,0.541,0.541,0.5441,0.5471,0.5486,0.5486,0.5502,0.5517,0.5547,0.5578,0.5608,0.5608,0.5608,0.5623,0.5623,0.5638,0.5653,0.5653,0.5669,0.5669,0.5669,0.5684,0.5714,0.5729,0.576,0.576,0.5775,0.579,0.5805,0.5821,0.5836,0.5851,0.5851,0.5866,0.5897,0.5912,0.5912,0.5927,0.5942,0.5942,0.5957,0.5988,0.6003,0.6003,0.6018,0.6018,0.6018,0.6049,0.6064,0.6109,0.6109,0.6109,0.6109,0.6109,0.6125,0.614,0.614,0.614,0.614,0.6155,0.6216,0.6246,0.6261,0.6261,0.6261,0.6261,0.6307,0.6322,0.6337,0.6337,0.6337,0.6353,0.6353,0.6368,0.6383,0.6413,0.6429,0.6459,0.6459,0.6489,0.6489,0.6489,0.652,0.652,0.6535,0.6535,0.655,0.655,0.655,0.6565,0.6565,0.6596,0.6596,0.6611,0.6626,0.6641,0.6641,0.6672,0.6687,0.6687,0.6702,0.6702,0.6733,0.6733,0.6763,0.6763,0.6778,0.6778,0.6809,0.6824,0.6824,0.6824,0.6839,0.6839,0.6854,0.6854,0.6884,0.69,0.6915,0.693,0.693,0.6945,0.6976,0.6991,0.6991,0.6991,0.6991,0.6991,0.7021,0.7021,0.7036,0.7036,0.7067,0.7082,0.7097,0.7097,0.7097,0.7097,0.7097,0.7097,0.7112,0.7143,0.7143,0.7143,0.7158,0.7158,0.7173,0.7173,0.7204,0.7204,0.7219,0.7234,0.7234,0.7264,0.7264,0.728,0.7295,0.7295,0.7295,0.7295,0.731,0.731,0.734,0.7356,0.7356,0.7371,0.7386,0.7401,0.7416,0.7432,0.7432,0.7447,0.7447,0.7462,0.7492,0.7523,0.7553,0.7568,0.7568,0.7568,0.7568,0.7568,0.7584,0.7599,0.7599,0.7614,0.7614,0.7614,0.7629,0.7629,0.7644,0.7644,0.769,0.769,0.7705,0.7705,0.7736,0.7751,0.7796,0.7796,0.7796,0.7812,0.7812,0.7812,0.7812,0.7827,0.7827,0.7827,0.7827,0.7842,0.7842,0.7857,0.7857,0.7857,0.7888,0.7903,0.7903,0.7918,0.7918,0.7918,0.7918,0.7918,0.7933,0.7948,0.7964,0.7964,0.7964,0.7964,0.7964,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7979,0.7994,0.7994,0.8024,0.8024,0.8024,0.8024,0.8024,0.8024,0.804,0.8055,0.8055,0.807,0.807,0.807,0.8085,0.81,0.81,0.81,0.81,0.81,0.81,0.81,0.81,0.8116,0.8116,0.8116,0.8146,0.8146,0.8146,0.8146,0.8161,0.8161,0.8176,0.8176,0.8176,0.8207,0.8207,0.8222,0.8222,0.8222,0.8237,0.8237,0.8237,0.8237,0.8237,0.8237,0.8237,0.8252,0.8252,0.8252,0.8267,0.8267,0.8283,0.8283,0.8328,0.8328,0.8328,0.8328,0.8343,0.8343,0.8343,0.8343,0.8359,0.8359,0.8374,0.8389,0.8404,0.8404,0.8404,0.8404,0.8419,0.8435,0.8435,0.8435,0.845,0.845,0.845,0.845,0.845,0.845,0.8465,0.8465,0.8465,0.8465,0.8465,0.848,0.848,0.8495,0.8495,0.8495,0.8495,0.8511,0.8511,0.8511,0.8526,0.8526,0.8526,0.8526,0.8526,0.8541,0.8541,0.8541,0.8556,0.8571,0.8571,0.8571,0.8571,0.8587,0.8587,0.8587,0.8587,0.8587,0.8587,0.8587,0.8602,0.8617,0.8617,0.8617,0.8617,0.8632,0.8632,0.8647,0.8647,0.8663,0.8663,0.8663,0.8663,0.8693,0.8693,0.8723,0.8723,0.8739,0.8739,0.8754,0.8754,0.8769,0.8769,0.8769,0.8784,0.8784,0.8784,0.8784,0.8784,0.8784,0.8784,0.8784,0.8784,0.8784,0.8799,0.8799,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.8815,0.883,0.8845,0.8845,0.8875,0.8875,0.8891,0.8906,0.8921,0.8921,0.8936,0.8951,0.8951,0.8951,0.8951,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8967,0.8997,0.8997,0.8997,0.9012,0.9012,0.9012,0.9012,0.9027,0.9027,0.9027,0.9027,0.9043,0.9043,0.9043,0.9043,0.9043,0.9043,0.9043,0.9058,0.9058,0.9058,0.9058,0.9058,0.9058,0.9058,0.9088,0.9088,0.9088,0.9088,0.9088,0.9088,0.9103,0.9103,0.9103,0.9103,0.9103,0.9119,0.9119,0.9149,0.9149,0.9164,0.9164,0.9164,0.9164,0.9179,0.9179,0.9195,0.9195,0.9195,0.921,0.921,0.921,0.921,0.921,0.924,0.924,0.924,0.924,0.9255,0.9255,0.9271,0.9271,0.9271,0.9271,0.9271,0.9271,0.9286,0.9286,0.9286,0.9301,0.9316,0.9316,0.9316,0.9316,0.9316,0.9316,0.9316,0.9316,0.9316,0.9316,0.9347,0.9347,0.9362,0.9362,0.9362,0.9362,0.9362,0.9362,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9377,0.9407,0.9422,0.9422,0.9422,0.9422,0.9422,0.9422,0.9422,0.9422,0.9422,0.9438,0.9438,0.9438,0.9438,0.9438,0.9438,0.9438,0.9438,0.9438,0.9438,0.9438,0.9453,0.9483,0.9483,0.9483,0.9483,0.9483,0.9483,0.9483,0.9498,0.9498,0.9514,0.9514,0.9514,0.9514,0.9514,0.9529,0.9544,0.9544,0.9544,0.9544,0.9544,0.9544,0.9544,0.9559,0.9559,0.9559,0.9559,0.9574,0.9574,0.9574,0.9574,0.9574,0.959,0.9605,0.9605,0.962,0.962,0.962,0.962,0.962,0.9635,0.9635,0.9635,0.9635,0.9635,0.9635,0.9635,0.9635,0.965,0.965,0.9666,0.9666,0.9666,0.9666,0.9666,0.9666,0.9681,0.9681,0.9696,0.9711,0.9726,0.9726,0.9726,0.9726,0.9726,0.9726,0.9742,0.9742,0.9742,0.9742,0.9742,0.9742,0.9742,0.9742,0.9742,0.9757,0.9772,0.9772,0.9772,0.9772,0.9772,0.9772,0.9772,0.9787,0.9787,0.9787,0.9787,0.9787,0.9787,0.9802,0.9802,0.9802,0.9802,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9818,0.9833,0.9833,0.9833,0.9833,0.9833,0.9848,0.9848,0.9848,0.9848,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9863,0.9878,0.9878,0.9878,0.9878,0.9878,0.9894,0.9909,0.9909,0.9909,0.9909,0.9909,0.9924,0.9924,0.9924,0.9924,0.9924,0.9924,0.9924,0.9939,0.997,0.997,0.9985,0.9985,0.9985,0.9985,0.9985,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0]},"rule":{"recent_days":3,"share_flagged":0.33145495281417614,"rule_catch":0.547112462006079,"rule_precision":0.0737402703809914,"model_catch":0.6550151975683891,"model_precision":0.08828349037279803},"before_cancel":{"Downgrade":0.4186,"Roll Advert":0.3044,"Settings":0.1672,"Thumbs Down":0.1098},"n_users":14729,"base_rate":0.04467377282911263};
+
+const NS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs = {}, style = {}, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  Object.assign(n.style, style);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+const lin = (d0, d1, r0, r1) => v => r0 + (v - d0) / (d1 - d0) * (r1 - r0);
+const fmt1 = v => v.toFixed(1);
+const pct0 = v => `${Math.round(v * 100)}%`;
+const euro = v => (v < 0 ? "−€" : "€") + Math.round(Math.abs(v)).toLocaleString("en-GB");
+
+const tip = document.getElementById("tip");
+function showTip(html, evt) {
+  tip.innerHTML = html;
+  tip.hidden = false;
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+  if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+  tip.style.left = `${x}px`;
+  tip.style.top = `${y}px`;
+}
+const hideTip = () => { tip.hidden = true; };
+const row = (swatch, label, value) =>
+  `<div class="r"><span>${swatch}${label}</span><span>${value}</span></div>`;
+const dot = color => `<i class="sw" style="background:${color}"></i>`;
+
+function axisText(parent, x, y, text, anchor = "middle", extra = {}) {
+  const t = svgEl("text", { x, y, "text-anchor": anchor, "font-size": 14, ...extra },
+    { fill: "var(--ink-3)" }, parent);
+  t.textContent = text;
+  return t;
+}
+
+function makeTable(host, headers, rows) {
+  const t = document.createElement("table");
+  t.innerHTML = `<thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>` +
+    `<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  host.appendChild(t);
+}
+
+/* ---------- run-up line chart ---------- */
+const DAYS = DATA.days;
+const SERIES = {
+  cancel: { name: "Cancelled", color: "var(--cancel)", values: DATA.curves["Cancelled"] },
+  matched: { name: "Retained, same day and plan", color: "var(--retain)", values: DATA.curves["Retained, matched"] },
+  naive: { name: "Retained, random date", color: "var(--naive)", values: DATA.curves["Retained, unmatched"], dash: "6 5" },
+};
+
+function runupChart(host, keys) {
+  const W = 760, H = 420, m = { l: 52, r: 128, t: 18, b: 54 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "Median events per day in the 28 days before cancellation" }, {}, host);
+  const x = lin(DAYS[0], 0, m.l, W - m.r);
+  const y = lin(0, 40, H - m.b, m.t);
+
+  for (let v = 0; v <= 40; v += 10) {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), "stroke-width": 1 },
+      { stroke: v === 0 ? "var(--rule-strong)" : "var(--rule)" }, svg);
+    axisText(svg, m.l - 10, y(v) + 4, v, "end");
+  }
+  for (const d of [-28, -21, -14, -7, 0]) {
+    axisText(svg, x(d), H - m.b + 22, d === 0 ? "day 0" : d);
+  }
+  axisText(svg, (m.l + W - m.r) / 2, H - 8, "days before cancellation");
+
+  const lines = keys.map(k => SERIES[k]);
+  for (const s of lines) {
+    const d = s.values.map((v, i) => `${i ? "L" : "M"}${x(DAYS[i]).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    svgEl("path", { d, "stroke-width": s === SERIES.cancel ? 3 : 2.5, "stroke-linejoin": "round",
+      "stroke-linecap": "round", ...(s.dash ? { "stroke-dasharray": s.dash } : {}) },
+      { fill: "none", stroke: s.color }, svg);
+  }
+
+  // end labels, nudged apart
+  const ends = lines.map(s => ({ s, v: s.values.at(-1), py: y(s.values.at(-1)) }))
+    .sort((a, b) => b.py - a.py);
+  for (let i = 1; i < ends.length; i++) {
+    if (ends[i - 1].py - ends[i].py < 20) ends[i].py = ends[i - 1].py - 20;
+  }
+  for (const e of ends) {
+    svgEl("circle", { cx: x(0), cy: y(e.v), r: 4.5, "stroke-width": 2 },
+      { fill: e.s.color, stroke: "var(--surface)" }, svg);
+    const t = svgEl("text", { x: x(0) + 12, y: e.py + 4, "font-size": 13, "font-weight": 500 },
+      { fill: "var(--ink)" }, svg);
+    t.textContent = fmt1(e.v);
+  }
+
+  // hover layer
+  const guide = svgEl("line", { y1: m.t, y2: H - m.b, "stroke-width": 1 },
+    { stroke: "var(--rule-strong)", visibility: "hidden" }, svg);
+  const marks = lines.map(s => svgEl("circle", { r: 5, "stroke-width": 2 },
+    { fill: s.color, stroke: "var(--surface)", visibility: "hidden" }, svg));
+  const hit = svgEl("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b },
+    { fill: "transparent", cursor: "crosshair" }, svg);
+  hit.addEventListener("pointermove", evt => {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const i = Math.max(0, Math.min(DAYS.length - 1, Math.round((p.x - m.l) / (W - m.l - m.r) * (DAYS.length - 1))));
+    guide.setAttribute("x1", x(DAYS[i])); guide.setAttribute("x2", x(DAYS[i]));
+    guide.style.visibility = "visible";
+    lines.forEach((s, j) => {
+      marks[j].setAttribute("cx", x(DAYS[i])); marks[j].setAttribute("cy", y(s.values[i]));
+      marks[j].style.visibility = "visible";
+    });
+    const label = DAYS[i] === 0 ? "Day of cancellation" : `${-DAYS[i]} days before`;
+    showTip(`<div class="t">${label}</div>` + lines.map(s => row(dot(s.color), s.name, fmt1(s.values[i]))).join(""), evt);
+  });
+  hit.addEventListener("pointerleave", () => {
+    guide.style.visibility = "hidden";
+    marks.forEach(mk => { mk.style.visibility = "hidden"; });
+    hideTip();
+  });
+}
+
+/* ---------- composition dot plot ---------- */
+const COMP_LABELS = {
+  skips: "Songs skipped", songs: "Songs played", adverts: "Adverts", thumbs_down: "Thumbs down",
+  thumbs_up: "Thumbs up", errors: "Errors", help: "Help page", settings: "Settings",
+  downgrade_pages: "Downgrade pages", upgrade_pages: "Upgrade pages", playlist_adds: "Playlist adds",
+};
+
+function mixChart(host) {
+  const rows = DATA.composition.slice().sort((a, b) => b.cancel.change - a.cancel.change);
+  const rowH = 32, m = { l: 150, r: 24, t: 12, b: 50 };
+  const W = 760, H = m.t + rowH * rows.length + m.b;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "Change in share of each activity type before cancellation, cancellers vs matched retained users" }, {}, host);
+  const x = lin(-35, 10, m.l, W - m.r);
+
+  for (let v = -30; v <= 10; v += 10) {
+    svgEl("line", { x1: x(v), x2: x(v), y1: m.t, y2: H - m.b, "stroke-width": 1 },
+      { stroke: v === 0 ? "var(--rule-strong)" : "var(--rule)" }, svg);
+    axisText(svg, x(v), H - m.b + 20, `${v > 0 ? "+" : ""}${v}%`);
+  }
+  axisText(svg, (m.l + W - m.r) / 2, H - 8, "change in share of activity");
+
+  rows.forEach((r, i) => {
+    const cy = m.t + rowH * i + rowH / 2;
+    const lab = svgEl("text", { x: m.l - 14, y: cy + 4, "text-anchor": "end", "font-size": 13 },
+      { fill: "var(--ink-2)", fontFamily: "var(--f-body)" }, svg);
+    lab.textContent = COMP_LABELS[r.component] || r.component;
+    const a = r.cancel.change * 100, b = r.matched.change * 100;
+    svgEl("line", { x1: x(Math.min(a, b)), x2: x(Math.max(a, b)), y1: cy, y2: cy, "stroke-width": 4, "stroke-linecap": "round" },
+      { stroke: "var(--rule)" }, svg);
+    for (const [key, v, color, name] of [["matched", b, "var(--retain)", "Retained, matched"], ["cancel", a, "var(--cancel)", "Cancelled"]]) {
+      const c = svgEl("circle", { cx: x(v), cy, r: 6.5, "stroke-width": 2 },
+        { fill: color, stroke: "var(--surface)", cursor: "default" }, svg);
+      const hitc = svgEl("circle", { cx: x(v), cy, r: 13 }, { fill: "transparent" }, svg);
+      hitc.addEventListener("pointermove", evt => {
+        const d = r[key];
+        showTip(`<div class="t">${COMP_LABELS[r.component]}</div>` +
+          row(dot(color), name, `${d.change >= 0 ? "+" : ""}${(d.change * 100).toFixed(1)}%`) +
+          row("", "per 100 events", `${d.base.toFixed(2)} → ${d.final.toFixed(2)}`), evt);
+      });
+      hitc.addEventListener("pointerleave", hideTip);
+    }
+  });
+
+  makeTable(document.getElementById("table-mix"),
+    ["Activity", "Cancelled, per 100", "Matched, per 100", "Gap in change"],
+    rows.map(r => [COMP_LABELS[r.component], `${r.cancel.base.toFixed(2)} → ${r.cancel.final.toFixed(2)}`,
+      `${r.matched.base.toFixed(2)} → ${r.matched.final.toFixed(2)}`,
+      `${((r.cancel.change - r.matched.change) * 100).toFixed(0)} pts`]));
+}
+
+/* ---------- exposure small multiples ---------- */
+function exposureChart(host, level) {
+  const rows = DATA.exposure.filter(r => r.level === level);
+  const W = 360, H = 280, m = { l: 40, r: 12, t: 26, b: 48 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": `Cancellations per 100 sessions by visit frequency, ${level} users` }, {}, host);
+  const y = lin(0, 1.6, H - m.b, m.t);
+  const bw = (W - m.l - m.r) / rows.length;
+
+  for (let v = 0; v <= 1.6; v += 0.4) {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), "stroke-width": 1 },
+      { stroke: v === 0 ? "var(--rule-strong)" : "var(--rule)" }, svg);
+    axisText(svg, m.l - 8, y(v) + 4, v.toFixed(1), "end");
+  }
+  rows.forEach((r, i) => {
+    const bx = m.l + i * bw + bw * 0.18, w = bw * 0.64;
+    const top = y(r.per_100_sessions), base = y(0);
+    const rad = Math.min(4, (base - top) / 2);
+    const d = `M${bx},${base} V${top + rad} Q${bx},${top} ${bx + rad},${top} H${bx + w - rad} Q${bx + w},${top} ${bx + w},${top + rad} V${base} Z`;
+    const bar = svgEl("path", { d }, { fill: i === rows.length - 1 ? "var(--slate)" : "var(--naive)" }, svg);
+    axisText(svg, bx + w / 2, H - m.b + 20, `Q${r.quintile}`);
+    if (i === 0 || i === rows.length - 1) {
+      const t = svgEl("text", { x: bx + w / 2, y: top - 8, "text-anchor": "middle", "font-size": 13, "font-weight": 500 },
+        { fill: "var(--ink)" }, svg);
+      t.textContent = r.per_100_sessions.toFixed(2);
+    }
+    const hitr = svgEl("rect", { x: m.l + i * bw, y: m.t, width: bw, height: H - m.t - m.b }, { fill: "transparent" }, svg);
+    hitr.addEventListener("pointermove", evt => showTip(
+      `<div class="t">${level === "paid" ? "Paid" : "Free"} · Q${r.quintile}</div>` +
+      row("", "Sessions in 28 days", r.sessions.toFixed(1)) +
+      row("", "Cancelled in 10 days", `${(r.churn_rate * 100).toFixed(1)}%`) +
+      row("", "Per 100 sessions", r.per_100_sessions.toFixed(2)), evt));
+    hitr.addEventListener("pointerleave", hideTip);
+  });
+  axisText(svg, (m.l + W - m.r) / 2, H - 8, "least → most frequent visitors");
+}
+
+/* ---------- horizontal bars ---------- */
+function hbarChart(host, { rows, max, ref, valueFmt, label }) {
+  const rowH = 46, m = { l: 150, r: 64, t: 10, b: ref !== undefined ? 34 : 8 };
+  const W = 620, H = m.t + rowH * rows.length + m.b;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": label }, {}, host);
+  const x = lin(0, max, m.l, W - m.r);
+  rows.forEach((r, i) => {
+    const cy = m.t + rowH * i + rowH / 2, h = 22, top = cy - h / 2;
+    const lab = svgEl("text", { x: m.l - 14, y: cy + 5, "text-anchor": "end", "font-size": 14 },
+      { fill: "var(--ink-2)", fontFamily: "var(--f-body)" }, svg);
+    lab.textContent = r.label;
+    const w = Math.max(2, x(r.v) - m.l), rad = Math.min(4, w / 2);
+    const d = `M${m.l},${top} H${m.l + w - rad} Q${m.l + w},${top} ${m.l + w},${top + rad} V${top + h - rad} Q${m.l + w},${top + h} ${m.l + w - rad},${top + h} H${m.l} Z`;
+    svgEl("path", { d }, { fill: r.color }, svg);
+    const t = svgEl("text", { x: m.l + w + 8, y: cy + 5, "font-size": 14, "font-weight": 500 }, { fill: "var(--ink)" }, svg);
+    t.textContent = valueFmt(r.v);
+  });
+  if (ref !== undefined) {
+    svgEl("line", { x1: x(ref), x2: x(ref), y1: m.t - 2, y2: H - m.b + 4, "stroke-width": 1.5, "stroke-dasharray": "4 4" },
+      { stroke: "var(--ink-3)" }, svg);
+    axisText(svg, x(ref), H - 10, "average user = 1.0×");
+  }
+}
+
+/* ---------- gains ---------- */
+function gainsChart(host) {
+  const W = 760, H = 440, m = { l: 56, r: 24, t: 18, b: 56 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "Share of cancellers reached by share of users contacted: model, random, and a one-line rule" }, {}, host);
+  const x = lin(0, 100, m.l, W - m.r), y = lin(0, 100, H - m.b, m.t);
+  for (let v = 0; v <= 100; v += 20) {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), "stroke-width": 1 },
+      { stroke: v === 0 ? "var(--rule-strong)" : "var(--rule)" }, svg);
+    axisText(svg, m.l - 10, y(v) + 4, `${v}%`, "end");
+    axisText(svg, x(v), H - m.b + 22, `${v}%`);
+  }
+  axisText(svg, (m.l + W - m.r) / 2, H - 8, "share of users contacted");
+  const ylab = axisText(svg, 16, (m.t + H - m.b) / 2, "share of cancellers reached", "middle",
+    { transform: `rotate(-90 16 ${(m.t + H - m.b) / 2})` });
+
+  svgEl("line", { x1: x(0), y1: y(0), x2: x(100), y2: y(100), "stroke-width": 1.5, "stroke-dasharray": "6 5" },
+    { stroke: "var(--naive)" }, svg);
+  const sc = DATA.gains.share_contacted, cg = DATA.gains.caught;
+  const d = sc.map((v, i) => `${i ? "L" : "M"}${x(v * 100).toFixed(1)},${y(cg[i] * 100).toFixed(1)}`).join("");
+  svgEl("path", { d, "stroke-width": 2.5, "stroke-linejoin": "round" }, { fill: "none", stroke: "var(--slate)" }, svg);
+
+  const R = DATA.rule, rx = x(R.share_flagged * 100), ry = y(R.rule_catch * 100), my = y(R.model_catch * 100);
+  svgEl("line", { x1: rx, x2: rx, y1: my + 6, y2: ry - 8, "stroke-width": 1.5 }, { stroke: "var(--ink-3)" }, svg);
+  const b = svgEl("text", { x: rx + 12, y: (my + ry) / 2 + 4, "font-size": 13, "font-weight": 500 }, { fill: "var(--ink)" }, svg);
+  b.textContent = `+${Math.round((R.model_catch - R.rule_catch) * 100)} pts`;
+  svgEl("circle", { cx: rx, cy: my, r: 5, "stroke-width": 2 }, { fill: "var(--slate)", stroke: "var(--surface)" }, svg);
+  svgEl("rect", { x: rx - 7, y: ry - 7, width: 14, height: 14, rx: 2, transform: `rotate(45 ${rx} ${ry})`, "stroke-width": 2 },
+    { fill: "var(--cancel)", stroke: "var(--surface)" }, svg);
+  const rl = svgEl("text", { x: rx + 14, y: ry + 22, "font-size": 12 }, { fill: "var(--ink-2)" }, svg);
+  rl.textContent = `rule: ${pct0(R.share_flagged)} contacted → ${pct0(R.rule_catch)}`;
+  const ml = svgEl("text", { x: rx - 12, y: my - 12, "text-anchor": "end", "font-size": 12 }, { fill: "var(--ink-2)" }, svg);
+  ml.textContent = `model: ${pct0(R.model_catch)}`;
+
+  const i10 = sc.findIndex(v => v >= 0.1);
+  const px = x(sc[i10] * 100), py = y(cg[i10] * 100);
+  svgEl("circle", { cx: px, cy: py, r: 5, "stroke-width": 2 }, { fill: "var(--slate)", stroke: "var(--surface)" }, svg);
+  const tl = svgEl("text", { x: px + 12, y: py + 18, "font-size": 12 }, { fill: "var(--ink-2)" }, svg);
+  tl.textContent = `top 10% → ${pct0(cg[i10])}`;
+
+  const guide = svgEl("circle", { r: 5, "stroke-width": 2 }, { fill: "var(--slate)", stroke: "var(--surface)", visibility: "hidden" }, svg);
+  const hit = svgEl("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b }, { fill: "transparent", cursor: "crosshair" }, svg);
+  hit.addEventListener("pointermove", evt => {
+    const pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const share = Math.max(0, Math.min(1, (p.x - m.l) / (W - m.l - m.r)));
+    const i = Math.min(sc.length - 1, sc.findIndex(v => v >= share));
+    guide.setAttribute("cx", x(sc[i] * 100)); guide.setAttribute("cy", y(cg[i] * 100));
+    guide.style.visibility = "visible";
+    showTip(`<div class="t">Contact top ${pct0(sc[i])}</div>` +
+      row(dot("var(--slate)"), "Model reaches", pct0(cg[i])) +
+      row(dot("var(--naive)"), "Random reaches", pct0(sc[i])), evt);
+  });
+  hit.addEventListener("pointerleave", () => { guide.style.visibility = "hidden"; hideTip(); });
+}
+
+/* ---------- economics ---------- */
+function econ() {
+  const host = document.getElementById("chart-econ");
+  const W = 760, H = 360, m = { l: 76, r: 24, t: 18, b: 56 };
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "Net value of a retention campaign by share of users contacted" }, {}, host);
+  const gAxes = svgEl("g", {}, {}, svg), gPlot = svgEl("g", {}, {}, svg);
+  const sc = DATA.gains.share_contacted, cg = DATA.gains.caught;
+  const N = DATA.n_users, BASE = DATA.base_rate;
+  const inSave = document.getElementById("in-save"), inCost = document.getElementById("in-cost"), inVal = document.getElementById("in-value");
+
+  function niceStep(span) {
+    const raw = span / 4, p = Math.pow(10, Math.floor(Math.log10(raw)));
+    return [1, 2, 2.5, 5, 10].map(k => k * p).find(s => s >= raw);
+  }
+
+  function draw() {
+    const save = +inSave.value / 100, cost = +inCost.value, value = +inVal.value;
+    document.getElementById("o-save").textContent = `${inSave.value}%`;
+    document.getElementById("o-cost").textContent = `€${cost.toFixed(2)}`;
+    document.getElementById("o-value").textContent = `€${value}`;
+
+    const net = sc.map((s, i) => cg[i] * BASE * N * save * value - s * N * cost);
+    let bi = 0; net.forEach((v, i) => { if (v > net[bi]) bi = i; });
+    const breakeven = Math.min(...sc.map((s, i) => i && cg[i] > 0 ? (s * cost) / (cg[i] * BASE * value) : Infinity));
+
+    const lo = Math.min(0, ...net), hi = Math.max(0, ...net);
+    const step = niceStep(hi - lo || 1);
+    const y0 = Math.floor(lo / step) * step, y1 = Math.ceil(hi / step) * step || step;
+    const x = lin(0, 1, m.l, W - m.r), y = lin(y0, y1, H - m.b, m.t);
+
+    gAxes.replaceChildren(); gPlot.replaceChildren();
+    for (let v = y0; v <= y1 + 1e-9; v += step) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), "stroke-width": 1 },
+        { stroke: Math.abs(v) < 1e-9 ? "var(--ink-3)" : "var(--rule)" }, gAxes);
+      axisText(gAxes, m.l - 10, y(v) + 4, euro(v), "end");
+    }
+    for (let v = 0; v <= 1.0001; v += 0.2) axisText(gAxes, x(v), H - m.b + 22, `${Math.round(v * 100)}%`);
+    axisText(gAxes, (m.l + W - m.r) / 2, H - 8, "share of users contacted, highest risk first");
+
+    const d = net.map((v, i) => `${i ? "L" : "M"}${x(sc[i]).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    svgEl("path", { d, "stroke-width": 2.5, "stroke-linejoin": "round" }, { fill: "none", stroke: "var(--slate)" }, gPlot);
+
+    const pays = net[bi] > 0;
+    if (pays) {
+      const bx = x(sc[bi]), by = y(net[bi]);
+      svgEl("circle", { cx: bx, cy: by, r: 6, "stroke-width": 2 }, { fill: "var(--cancel)", stroke: "var(--surface)" }, gPlot);
+      const t = svgEl("text", { x: bx, y: by - 14, "text-anchor": sc[bi] > 0.75 ? "end" : "middle", "font-size": 13, "font-weight": 500 },
+        { fill: "var(--ink)" }, gPlot);
+      t.textContent = `best: top ${pct0(sc[bi])}, ${euro(net[bi])}`;
+    }
+    document.getElementById("out-best").textContent = pays ? pct0(sc[bi]) : "None";
+    document.getElementById("out-net").textContent = pays ? euro(net[bi]) : "€0";
+    document.getElementById("out-breakeven").textContent = `${(breakeven * 100).toFixed(1)}%`;
+  }
+  [inSave, inCost, inVal].forEach(inp => inp.addEventListener("input", draw));
+  draw();
+}
+
+/* ---------- mount ---------- */
+runupChart(document.getElementById("chart-first"), ["naive", "cancel"]);
+runupChart(document.getElementById("chart-fair"), ["naive", "matched", "cancel"]);
+makeTable(document.getElementById("table-fair"),
+  ["Days before", "Cancelled", "Retained, matched", "Retained, random date"],
+  DAYS.filter(dd => dd % 7 === 0 || dd === -1).map(dd => {
+    const i = DAYS.indexOf(dd);
+    return [dd === 0 ? "day 0" : dd, fmt1(SERIES.cancel.values[i]), fmt1(SERIES.matched.values[i]), fmt1(SERIES.naive.values[i])];
+  }));
+mixChart(document.getElementById("chart-mix"));
+exposureChart(document.getElementById("chart-exp-paid"), "paid");
+exposureChart(document.getElementById("chart-exp-free"), "free");
+makeTable(document.getElementById("table-exp"),
+  ["Plan", "Quintile", "Sessions", "Cancelled", "Per 100 sessions"],
+  DATA.exposure.map(r => [r.level, `Q${r.quintile}`, r.sessions.toFixed(1), `${(r.churn_rate * 100).toFixed(1)}%`, r.per_100_sessions.toFixed(2)]));
+hbarChart(document.getElementById("chart-ads"), {
+  label: "Advert exposure lift: pooled, free users, paid users",
+  max: 1.6, ref: 1, valueFmt: v => `${v.toFixed(2)}×`,
+  rows: [
+    { label: "All users, pooled", v: DATA.ads.all, color: "var(--naive)" },
+    { label: "Free users", v: DATA.ads.free, color: "var(--slate)" },
+    { label: "Paid users", v: DATA.ads.paid, color: "var(--slate)" },
+  ],
+});
+hbarChart(document.getElementById("chart-before"), {
+  label: "Page viewed immediately before Cancel",
+  max: 0.5, valueFmt: v => pct0(v),
+  rows: Object.entries(DATA.before_cancel).map(([k, v], i) => ({ label: k, v, color: i === 0 ? "var(--slate)" : "var(--naive)" })),
+});
+gainsChart(document.getElementById("chart-gains"));
+econ();
+
+/* ---------- deck navigation ---------- */
+const slides = [...document.querySelectorAll(".slide")];
+const count = document.getElementById("nav-count");
+const bar = document.getElementById("progress-bar");
+let current = 0;
+function locate() {
+  const mid = innerHeight * 0.4;
+  let idx = 0;
+  slides.forEach((s, i) => { if (s.getBoundingClientRect().top <= mid) idx = i; });
+  current = idx;
+  count.textContent = `${idx + 1} / ${slides.length}`;
+  const max = document.documentElement.scrollHeight - innerHeight;
+  bar.style.width = `${max > 0 ? (scrollY / max) * 100 : 0}%`;
+}
+let ticking = false;
+addEventListener("scroll", () => {
+  if (!ticking) { requestAnimationFrame(() => { locate(); ticking = false; }); ticking = true; }
+}, { passive: true });
+function go(delta) {
+  const next = Math.max(0, Math.min(slides.length - 1, current + delta));
+  slides[next].scrollIntoView({ block: "start" });
+}
+document.getElementById("nav-prev").addEventListener("click", () => go(-1));
+document.getElementById("nav-next").addEventListener("click", () => go(1));
+addEventListener("keydown", evt => {
+  if (evt.target.closest("input, textarea, select, summary, button")) return;
+  if (["ArrowDown", "ArrowRight", "PageDown", " "].includes(evt.key)) { evt.preventDefault(); go(1); }
+  if (["ArrowUp", "ArrowLeft", "PageUp"].includes(evt.key)) { evt.preventDefault(); go(-1); }
+  if (evt.key === "Home") { evt.preventDefault(); slides[0].scrollIntoView(); }
+  if (evt.key === "End") { evt.preventDefault(); slides.at(-1).scrollIntoView(); }
+});
+locate();
+</script>
